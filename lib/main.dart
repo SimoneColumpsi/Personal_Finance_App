@@ -1,122 +1,186 @@
 import 'package:flutter/material.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const PersonalFinanceApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PersonalFinanceApp extends StatelessWidget {
+  const PersonalFinanceApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'Gestione Spese',
+      theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+      home: const HomePage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _HomePageState extends State<HomePage> {
+  final List<Transaction> _transactions = [
+    Transaction(
+      id: 't1',
+      title: 'Nuove Scarpe Nike',
+      amount: 69.99,
+      date: DateTime.now(),
+    ),
+    Transaction(
+      id: 't2',
+      title: 'Spesa Esselunga',
+      amount: 45.50,
+      date: DateTime.now().subtract(const Duration(days: 1)),
+    ),
+  ];
 
-  void _incrementCounter() {
+  final _titleController = TextEditingController();
+  final _amountController = TextEditingController();
+
+  void _addNewTransaction() {
+    final enteredTitle = _titleController.text;
+    final enteredAmount = double.tryParse(_amountController.text) ?? 0;
+
+    if (enteredTitle.isEmpty || enteredAmount <= 0) {
+      return;
+    }
+
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _transactions.add(
+        Transaction(
+          id: DateTime.now().toString(),
+          title: enteredTitle,
+          amount: enteredAmount,
+          date: DateTime.now(),
+        ),
+      );
     });
+
+    _titleController.clear();
+    _amountController.clear();
+
+    Navigator.of(context).pop();
+  }
+
+  // [NUOVO] Funzione per CANCELLARE una spesa
+  void _deleteTransaction(String idDaCancellare) {
+    setState(() {
+      // "Rimuovi dove l'id è uguale a quello che ti ho passato"
+      _transactions.removeWhere((tx) => tx.id == idDaCancellare);
+    });
+  }
+
+  void _startAddNewTransaction(BuildContext ctx) {
+    showModalBottomSheet(
+      context: ctx,
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              TextField(
+                decoration: const InputDecoration(labelText: 'Titolo Spesa'),
+                controller: _titleController,
+              ),
+              TextField(
+                decoration: const InputDecoration(labelText: 'Importo (€)'),
+                controller: _amountController,
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _addNewTransaction,
+                child: const Text('Aggiungi Transazione'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Le mie Spese'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      body: _transactions.isEmpty
+          ? const Center(
+              child: Text("Nessuna spesa inserita!"),
+            ) // [NUOVO] Se vuoto mostra scritta
+          : ListView.builder(
+              itemCount: _transactions.length,
+              itemBuilder: (ctx, index) {
+                final tx = _transactions[index];
+                return Card(
+                  elevation: 3,
+                  margin: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 16,
+                  ),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      radius: 30,
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: FittedBox(
+                          child: Text('€${tx.amount.toStringAsFixed(2)}'),
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      tx.title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    subtitle: Text(
+                      tx.date.toString().substring(0, 10),
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    // [NUOVO] Il cestino rosso a destra
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete),
+                      color: Colors.red,
+                      onPressed: () => _deleteTransaction(tx.id),
+                    ),
+                  ),
+                );
+              },
             ),
-          ],
-        ),
-      ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
+        onPressed: () => _startAddNewTransaction(context),
         child: const Icon(Icons.add),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
+}
+
+class Transaction {
+  final String id;
+  final String title;
+  final double amount;
+  final DateTime date;
+
+  Transaction({
+    required this.id,
+    required this.title,
+    required this.amount,
+    required this.date,
+  });
 }
