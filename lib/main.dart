@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-// IMPORTANTE: Servono per attivare la lingua italiana nelle date
 import 'package:intl/date_symbol_data_local.dart';
 import './models/transaction.dart';
 import './widgets/new_transaction.dart';
 import './widgets/chart.dart';
 
 void main() {
-  // Inizializziamo la formattazione date per l'Italia prima di avviare l'app
   initializeDateFormatting('it_IT', null).then((_) {
     runApp(const PersonalFinanceApp());
   });
@@ -20,7 +18,6 @@ class PersonalFinanceApp extends StatefulWidget {
 }
 
 class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
-  // MODIFICA 1: Partiamo subito con il tema CHIARO (Light) invece di System
   ThemeMode _themeMode = ThemeMode.light;
 
   void _toggleTheme() {
@@ -38,8 +35,6 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
     return MaterialApp(
       title: 'Gestione Spese',
       themeMode: _themeMode,
-
-      // TEMA CHIARO
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
@@ -60,8 +55,6 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
           ),
         ),
       ),
-
-      // TEMA SCURO
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -92,7 +85,6 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
           style: TextButton.styleFrom(foregroundColor: Colors.amber),
         ),
       ),
-
       home: HomePage(changeTheme: _toggleTheme),
     );
   }
@@ -122,13 +114,28 @@ class _HomePageState extends State<HomePage> {
     ),
   ];
 
+  // 0 = Settimana, 1 = Mese, 2 = Anno
+  int _selectedChartPeriod = 0;
+
+  // FILTRO DINAMICO: Cambia in base al bottone premuto
   List<Transaction> get _recentTransactions {
+    DateTime limitDate;
+
+    if (_selectedChartPeriod == 0) {
+      // SETTIMANA: Ultimi 7 giorni
+      limitDate = DateTime.now().subtract(const Duration(days: 7));
+    } else if (_selectedChartPeriod == 1) {
+      // MESE: Ultimi 30 giorni
+      limitDate = DateTime.now().subtract(const Duration(days: 30));
+    } else {
+      // ANNO: Ultimi 365 giorni
+      limitDate = DateTime.now().subtract(const Duration(days: 365));
+    }
+
     return _transactions.where((tx) {
-      return tx.date.isAfter(DateTime.now().subtract(const Duration(days: 7)));
+      return tx.date.isAfter(limitDate);
     }).toList();
   }
-
-  int _selectedChartPeriod = 0;
 
   void _addNewTransaction(
     String txTitle,
@@ -152,21 +159,45 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // MODIFICA 2: Risoluzione bug tastiera che copre il campo
   void _startAddNewTransaction(BuildContext ctx) {
     showModalBottomSheet(
       context: ctx,
-      isScrollControlled:
-          true, // Permette al foglio di espandersi a tutto schermo
+      isScrollControlled: true,
       builder: (_) {
         return Padding(
-          // Aggiungiamo un margine sotto pari all'altezza della tastiera (viewInsets)
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
           ),
           child: NewTransaction(_addNewTransaction),
         );
       },
+    );
+  }
+
+  // Costruisce i bottoni sopra il grafico
+  Widget _buildFilterButton(String title, int index) {
+    final isSelected = _selectedChartPeriod == index;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: OutlinedButton(
+        onPressed: () {
+          setState(() {
+            _selectedChartPeriod = index;
+          });
+        },
+        style: OutlinedButton.styleFrom(
+          backgroundColor: isSelected
+              ? Theme.of(context).colorScheme.secondary
+              : null,
+          foregroundColor: isSelected
+              ? Colors.black
+              : Theme.of(context).colorScheme.onSurface,
+          side: BorderSide(
+            color: isSelected ? Colors.transparent : Colors.grey,
+          ),
+        ),
+        child: Text(title),
+      ),
     );
   }
 
@@ -190,7 +221,7 @@ class _HomePageState extends State<HomePage> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // --- NUOVO PEZZO: I BOTTONI DEI FILTRI ---
+          // FILTRI TEMPORALI
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             child: Row(
@@ -203,13 +234,13 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // -----------------------------------------
+          // GRAFICO
           SizedBox(
             height: 180,
-            // Per ora passiamo sempre le stesse transazioni, poi collegheremo la logica
-            child: Chart(_recentTransactions),
+            // Passiamo le transazioni filtrate E l'indice del periodo scelto
+            child: Chart(_recentTransactions, _selectedChartPeriod),
           ),
-          SizedBox(height: 180, child: Chart(_recentTransactions)),
+
           Expanded(
             child: _transactions.isEmpty
                 ? Center(
@@ -262,7 +293,6 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                           subtitle: Text(
-                            // Formattiamo anche qui la data in italiano? Per ora semplice:
                             "${tx.date.day}/${tx.date.month}/${tx.date.year}",
                             style: TextStyle(
                               color: Theme.of(
@@ -289,32 +319,4 @@ class _HomePageState extends State<HomePage> {
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
-
-  // Funzione che crea un bottone personalizzato
-  Widget _buildFilterButton(String title, int index) {
-    final isSelected = _selectedChartPeriod == index;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: OutlinedButton(
-        onPressed: () {
-          setState(() {
-            _selectedChartPeriod = index;
-          });
-        },
-        style: OutlinedButton.styleFrom(
-          // Se selezionato, sfondo colorato. Se no, trasparente.
-          backgroundColor: isSelected
-              ? Theme.of(context).colorScheme.secondary
-              : null,
-          foregroundColor: isSelected
-              ? Colors.black
-              : Theme.of(context).colorScheme.onSurface,
-          side: BorderSide(
-            color: isSelected ? Colors.transparent : Colors.grey,
-          ),
-        ),
-        child: Text(title),
-      ),
-    );
-  }
-} // Fine della classe HomePageState
+}
