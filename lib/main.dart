@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import './models/transaction.dart';
+import './widgets/new_transaction.dart';
 
 void main() {
   runApp(const PersonalFinanceApp());
@@ -17,6 +19,7 @@ class PersonalFinanceApp extends StatelessWidget {
   }
 }
 
+// --- HOME PAGE (La schermata principale con la lista) ---
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -40,69 +43,38 @@ class _HomePageState extends State<HomePage> {
     ),
   ];
 
-  final _titleController = TextEditingController();
-  final _amountController = TextEditingController();
-
-  void _addNewTransaction() {
-    final enteredTitle = _titleController.text;
-    final enteredAmount = double.tryParse(_amountController.text) ?? 0;
-
-    if (enteredTitle.isEmpty || enteredAmount <= 0) {
-      return;
-    }
+  // Funzione per aggiungere la spesa alla lista
+  void _addNewTransaction(
+    String txTitle,
+    double txAmount,
+    DateTime chosenDate,
+  ) {
+    final newTx = Transaction(
+      title: txTitle,
+      amount: txAmount,
+      date: chosenDate,
+      id: DateTime.now().toString(),
+    );
 
     setState(() {
-      _transactions.add(
-        Transaction(
-          id: DateTime.now().toString(),
-          title: enteredTitle,
-          amount: enteredAmount,
-          date: DateTime.now(),
-        ),
-      );
-    });
-
-    _titleController.clear();
-    _amountController.clear();
-
-    Navigator.of(context).pop();
-  }
-
-  // [NUOVO] Funzione per CANCELLARE una spesa
-  void _deleteTransaction(String idDaCancellare) {
-    setState(() {
-      // "Rimuovi dove l'id è uguale a quello che ti ho passato"
-      _transactions.removeWhere((tx) => tx.id == idDaCancellare);
+      _transactions.add(newTx);
     });
   }
 
+  // Funzione per cancellare
+  void _deleteTransaction(String id) {
+    setState(() {
+      _transactions.removeWhere((tx) => tx.id == id);
+    });
+  }
+
+  // Funzione che apre il foglio dal basso
   void _startAddNewTransaction(BuildContext ctx) {
     showModalBottomSheet(
       context: ctx,
       builder: (_) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              TextField(
-                decoration: const InputDecoration(labelText: 'Titolo Spesa'),
-                controller: _titleController,
-              ),
-              TextField(
-                decoration: const InputDecoration(labelText: 'Importo (€)'),
-                controller: _amountController,
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _addNewTransaction,
-                child: const Text('Aggiungi Transazione'),
-              ),
-            ],
-          ),
-        );
+        // Qui richiamiamo il nuovo componente creato sotto
+        return NewTransaction(_addNewTransaction);
       },
     );
   }
@@ -116,9 +88,7 @@ class _HomePageState extends State<HomePage> {
         foregroundColor: Colors.white,
       ),
       body: _transactions.isEmpty
-          ? const Center(
-              child: Text("Nessuna spesa inserita!"),
-            ) // [NUOVO] Se vuoto mostra scritta
+          ? const Center(child: Text("Nessuna spesa inserita!"))
           : ListView.builder(
               itemCount: _transactions.length,
               itemBuilder: (ctx, index) {
@@ -149,10 +119,10 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     subtitle: Text(
-                      tx.date.toString().substring(0, 10),
+                      // Formattazione data semplice
+                      "${tx.date.day}/${tx.date.month}/${tx.date.year}",
                       style: const TextStyle(color: Colors.grey),
                     ),
-                    // [NUOVO] Il cestino rosso a destra
                     trailing: IconButton(
                       icon: const Icon(Icons.delete),
                       color: Colors.red,
@@ -169,18 +139,4 @@ class _HomePageState extends State<HomePage> {
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
-}
-
-class Transaction {
-  final String id;
-  final String title;
-  final double amount;
-  final DateTime date;
-
-  Transaction({
-    required this.id,
-    required this.title,
-    required this.amount,
-    required this.date,
-  });
 }
