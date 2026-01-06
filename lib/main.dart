@@ -6,22 +6,97 @@ void main() {
   runApp(const PersonalFinanceApp());
 }
 
-class PersonalFinanceApp extends StatelessWidget {
+class PersonalFinanceApp extends StatefulWidget {
   const PersonalFinanceApp({super.key});
+
+  @override
+  State<PersonalFinanceApp> createState() => _PersonalFinanceAppState();
+}
+
+class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
+  ThemeMode _themeMode = ThemeMode.system;
+
+  void _toggleTheme() {
+    setState(() {
+      if (_themeMode == ThemeMode.light) {
+        _themeMode = ThemeMode.dark;
+      } else {
+        _themeMode = ThemeMode.light;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Gestione Spese',
-      theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
-      home: const HomePage(),
+      themeMode: _themeMode,
+
+      // --- TEMA CHIARO (Teal & Amber) ---
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.light,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          secondary: Colors.amber,
+          brightness: Brightness.light,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.teal,
+          foregroundColor: Colors.white,
+          centerTitle: true,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.teal,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ),
+
+      // --- TEMA SCURO (Black & Gold) ---
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Colors.black, // Sfondo NERO
+        colorScheme: ColorScheme.dark(
+          primary: Colors.amber, // ORO
+          secondary: Colors.amberAccent,
+          surface: Colors.grey.shade900,
+          onPrimary: Colors.black,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.amber,
+          centerTitle: true,
+        ),
+        // Abbiamo tolto CardTheme da qui per evitare l'errore
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.amber,
+            foregroundColor: Colors.black,
+            // CORRETTO: fontWeight va dentro textStyle
+            textStyle: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: Colors.amber,
+          foregroundColor: Colors.black,
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: Colors.amber),
+        ),
+      ),
+
+      home: HomePage(changeTheme: _toggleTheme),
     );
   }
 }
 
-// --- HOME PAGE (La schermata principale con la lista) ---
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final VoidCallback changeTheme;
+
+  const HomePage({super.key, required this.changeTheme});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -43,7 +118,6 @@ class _HomePageState extends State<HomePage> {
     ),
   ];
 
-  // Funzione per aggiungere la spesa alla lista
   void _addNewTransaction(
     String txTitle,
     double txAmount,
@@ -61,19 +135,16 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // Funzione per cancellare
   void _deleteTransaction(String id) {
     setState(() {
       _transactions.removeWhere((tx) => tx.id == id);
     });
   }
 
-  // Funzione che apre il foglio dal basso
   void _startAddNewTransaction(BuildContext ctx) {
     showModalBottomSheet(
       context: ctx,
       builder: (_) {
-        // Qui richiamiamo il nuovo componente creato sotto
         return NewTransaction(_addNewTransaction);
       },
     );
@@ -81,33 +152,69 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // Verifichiamo se siamo in modalità scura
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Le mie Spese'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+        title: const Text(
+          'LE MIE SPESE',
+          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2),
+        ),
+        actions: [
+          IconButton(
+            onPressed: widget.changeTheme,
+            icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
+            tooltip: 'Cambia Tema',
+          ),
+        ],
       ),
       body: _transactions.isEmpty
-          ? const Center(child: Text("Nessuna spesa inserita!"))
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.wallet, size: 80, color: Colors.grey.shade700),
+                  const SizedBox(height: 20),
+                  Text(
+                    "Nessuna spesa inserita!",
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 18),
+                  ),
+                ],
+              ),
+            )
           : ListView.builder(
               itemCount: _transactions.length,
               itemBuilder: (ctx, index) {
                 final tx = _transactions[index];
                 return Card(
-                  elevation: 3,
+                  // APPLICHIAMO LO STILE QUI DIRETTAMENTE
+                  elevation: isDarkMode ? 2 : 4,
+                  // Se è scuro: grigio scuro. Se è chiaro: default (bianco)
+                  color: isDarkMode ? Colors.grey.shade900 : null,
                   margin: const EdgeInsets.symmetric(
                     vertical: 8,
                     horizontal: 16,
                   ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    // Se è scuro: bordo ORO. Se è chiaro: niente bordo.
+                    side: isDarkMode
+                        ? const BorderSide(color: Colors.amber, width: 1)
+                        : BorderSide.none,
+                  ),
                   child: ListTile(
                     leading: CircleAvatar(
                       radius: 30,
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       child: Padding(
                         padding: const EdgeInsets.all(6),
                         child: FittedBox(
-                          child: Text('€${tx.amount.toStringAsFixed(2)}'),
+                          child: Text(
+                            '€${tx.amount.toStringAsFixed(2)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
                         ),
                       ),
                     ),
@@ -119,13 +226,14 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     subtitle: Text(
-                      // Formattazione data semplice
                       "${tx.date.day}/${tx.date.month}/${tx.date.year}",
-                      style: const TextStyle(color: Colors.grey),
+                      style: TextStyle(
+                        color: Theme.of(context).textTheme.bodySmall?.color,
+                      ),
                     ),
                     trailing: IconButton(
-                      icon: const Icon(Icons.delete),
-                      color: Colors.red,
+                      icon: const Icon(Icons.delete_outline),
+                      color: Theme.of(context).colorScheme.error,
                       onPressed: () => _deleteTransaction(tx.id),
                     ),
                   ),
