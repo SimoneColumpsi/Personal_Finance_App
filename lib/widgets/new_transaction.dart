@@ -20,7 +20,9 @@ class _NewTransactionState extends State<NewTransaction> {
       return;
     }
     final enteredTitle = _titleController.text;
-    final enteredAmount = double.parse(_amountController.text);
+    final enteredAmount = double.parse(
+      _amountController.text.replaceAll(',', '.'),
+    );
 
     // Validazione: se manca titolo, prezzo o data, fermati!
     if (enteredTitle.isEmpty || enteredAmount <= 0 || _selectedDate == null) {
