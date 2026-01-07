@@ -1,20 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import './chart_bar.dart';
 import '../models/transaction.dart';
+import './chart_bar.dart';
 
 class Chart extends StatelessWidget {
   final List<Transaction> recentTransactions;
   final int periodIndex; // 0=Settimana, 1=Mese, 2=Anno
 
-  // Ora accettiamo l'indice del periodo nel costruttore
   const Chart(this.recentTransactions, this.periodIndex, {super.key});
 
   List<Map<String, Object>> get groupedTransactionValues {
-    // CASO 0: SETTIMANA (7 GIORNI)
+    final now = DateTime.now();
+
+    // --- CASO 0: SETTIMANA (Lunedì - Domenica) ---
     if (periodIndex == 0) {
+      // Troviamo il Lunedì di questa settimana
+      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+
       return List.generate(7, (index) {
-        final weekDay = DateTime.now().subtract(Duration(days: index));
+        final weekDay = startOfWeek.add(Duration(days: index));
         var totalSum = 0.0;
 
         for (var i = 0; i < recentTransactions.length; i++) {
@@ -25,60 +29,67 @@ class Chart extends StatelessWidget {
           }
         }
 
+        // Formattiamo il giorno (es. "lun", "mar")
         String dayName = DateFormat.E('it_IT').format(weekDay);
-        // "lun" -> "Lun"
         String label =
             dayName.substring(0, 1).toUpperCase() + dayName.substring(1);
 
         return {'day': label, 'amount': totalSum};
-      }).reversed.toList();
+      });
     }
-    // CASO 1: MESE (ULTIME 4 SETTIMANE)
+    // --- CASO 1: MESE (4 Settimane fisse) ---
     else if (periodIndex == 1) {
       return List.generate(4, (index) {
-        // Calcoliamo l'intervallo di questa settimana
-        final weekStart = DateTime.now().subtract(
-          Duration(days: (index + 1) * 7),
-        );
-        final weekEnd = DateTime.now().subtract(Duration(days: index * 7));
-
         var totalSum = 0.0;
+        String label = '';
+
+        if (index == 0)
+          label = '1-7';
+        else if (index == 1)
+          label = '8-14';
+        else if (index == 2)
+          label = '15-21';
+        else
+          label = '22+';
 
         for (var tx in recentTransactions) {
-          if (tx.date.isAfter(weekStart) && tx.date.isBefore(weekEnd)) {
+          int day = tx.date.day;
+          bool isInPeriod = false;
+
+          if (index == 0 && day >= 1 && day <= 7) isInPeriod = true;
+          if (index == 1 && day >= 8 && day <= 14) isInPeriod = true;
+          if (index == 2 && day >= 15 && day <= 21) isInPeriod = true;
+          if (index == 3 && day >= 22) isInPeriod = true;
+
+          if (isInPeriod &&
+              tx.date.month == now.month &&
+              tx.date.year == now.year) {
             totalSum += tx.amount;
           }
         }
 
-        return {'day': '${4 - index}ª Set', 'amount': totalSum};
-      }).reversed.toList();
+        return {'day': label, 'amount': totalSum};
+      });
     }
-    // CASO 2: ANNO (ULTIMI 12 MESI)
+    // --- CASO 2: ANNO (Gennaio - Dicembre) ---
     else {
       return List.generate(12, (index) {
-        // Calcoliamo il mese
-        final monthDate = DateTime(
-          DateTime.now().year,
-          DateTime.now().month - index,
-          1,
-        );
-
+        final monthNumber = index + 1;
         var totalSum = 0.0;
 
         for (var tx in recentTransactions) {
-          if (tx.date.month == monthDate.month &&
-              tx.date.year == monthDate.year) {
+          if (tx.date.month == monthNumber && tx.date.year == now.year) {
             totalSum += tx.amount;
           }
         }
 
-        String monthName = DateFormat.MMM('it_IT').format(monthDate);
-        // "gen" -> "Gen"
+        final dateForName = DateTime(now.year, monthNumber, 1);
+        String monthName = DateFormat.MMM('it_IT').format(dateForName);
         String label =
             monthName.substring(0, 1).toUpperCase() + monthName.substring(1);
 
         return {'day': label, 'amount': totalSum};
-      }).reversed.toList();
+      });
     }
   }
 
@@ -93,22 +104,45 @@ class Chart extends StatelessWidget {
     return Card(
       elevation: 6,
       margin: const EdgeInsets.all(20),
+      color: Theme.of(context).cardColor,
       child: Padding(
         padding: const EdgeInsets.all(10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: groupedTransactionValues.map((data) {
-            return Flexible(
-              fit: FlexFit.tight,
-              child: ChartBar(
-                data['day'] as String,
-                data['amount'] as double,
-                totalSpending == 0.0
-                    ? 0.0
-                    : (data['amount'] as double) / totalSpending,
+        child: Column(
+          children: [
+            // TITOLO
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                periodIndex == 0
+                    ? "Questa Settimana"
+                    : periodIndex == 1
+                    ? "Questo Mese"
+                    : "Quest'Anno (${DateTime.now().year})",
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-            );
-          }).toList(),
+            ),
+
+            // BARRE DEL GRAFICO
+            // IMPORTANTE: Expanded serve per dare un'altezza finita alle barre
+            // ed evitare l'errore di "Altezza Infinita" che bloccava l'app.
+            Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: groupedTransactionValues.map((data) {
+                  return Flexible(
+                    fit: FlexFit.tight,
+                    child: ChartBar(
+                      (data['day'] as String),
+                      (data['amount'] as double),
+                      totalSpending == 0.0
+                          ? 0.0
+                          : (data['amount'] as double) / totalSpending,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
         ),
       ),
     );

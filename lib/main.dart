@@ -292,18 +292,40 @@ class _HomePageState extends State<HomePage> {
 
           loadedTransactions.sort((a, b) => b.date.compareTo(a.date));
 
-          DateTime limitDate;
-          if (_selectedChartPeriod == 0) {
-            limitDate = DateTime.now().subtract(const Duration(days: 7));
-          } else if (_selectedChartPeriod == 1) {
-            limitDate = DateTime.now().subtract(const Duration(days: 30));
-          } else {
-            limitDate = DateTime.now().subtract(const Duration(days: 365));
-          }
+          // --- INIZIO NUOVA LOGICA CALENDARIO ---
+          final now = DateTime.now();
+          List<Transaction> recentForChart = [];
 
-          final recentForChart = loadedTransactions.where((tx) {
-            return tx.date.isAfter(limitDate);
-          }).toList();
+          if (_selectedChartPeriod == 0) {
+            // SETTIMANA: Dal Lunedì corrente in poi
+            final mondayThisWeek = DateTime(
+              now.year,
+              now.month,
+              now.day,
+            ).subtract(Duration(days: now.weekday - 1));
+
+            recentForChart = loadedTransactions.where((tx) {
+              return tx.date.isAfter(mondayThisWeek) ||
+                  tx.date.isAtSameMomentAs(mondayThisWeek);
+            }).toList();
+          } else if (_selectedChartPeriod == 1) {
+            // MESE: Dal 1° del mese in poi
+            final firstDayOfMonth = DateTime(now.year, now.month, 1);
+
+            recentForChart = loadedTransactions.where((tx) {
+              return tx.date.isAfter(firstDayOfMonth) ||
+                  tx.date.isAtSameMomentAs(firstDayOfMonth);
+            }).toList();
+          } else {
+            // ANNO: Dal 1° Gennaio in poi
+            final firstDayOfYear = DateTime(now.year, 1, 1);
+
+            recentForChart = loadedTransactions.where((tx) {
+              return tx.date.isAfter(firstDayOfYear) ||
+                  tx.date.isAtSameMomentAs(firstDayOfYear);
+            }).toList();
+          }
+          // --- FINE NUOVA LOGICA ---
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
