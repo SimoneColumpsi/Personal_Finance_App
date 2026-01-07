@@ -155,7 +155,6 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // --- FUNZIONE PER MODIFICARE (UPDATE) ---
   void _editTransactionFirebase(
     String id,
     String txTitle,
@@ -190,7 +189,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- APRE IL MODALE IN MODALITÀ MODIFICA ---
   void _startEditTransaction(BuildContext ctx, Transaction tx) {
     showModalBottomSheet(
       context: ctx,
@@ -200,9 +198,7 @@ class _HomePageState extends State<HomePage> {
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
           ),
-          // Passiamo i dati esistenti al modulo
           child: NewTransaction(
-            // Qui creiamo una funzione "ponte" che chiama l'update usando l'ID della spesa
             (title, amount, date, category) =>
                 _editTransactionFirebase(tx.id, title, amount, date, category),
             existingTitle: tx.title,
@@ -336,72 +332,125 @@ class _HomePageState extends State<HomePage> {
                   itemCount: loadedTransactions.length,
                   itemBuilder: (ctx, index) {
                     final tx = loadedTransactions[index];
-                    return Card(
-                      elevation: isDarkMode ? 2 : 4,
-                      color: isDarkMode ? Colors.grey.shade900 : null,
-                      margin: const EdgeInsets.symmetric(
-                        vertical: 8,
-                        horizontal: 16,
+
+                    // --- DISMISSIBLE: SWIPE PER CANCELLARE ---
+                    return Dismissible(
+                      key: ValueKey(
+                        tx.id,
+                      ), // Chiave univoca per identificare l'elemento
+                      background: Container(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.error, // Sfondo Rosso
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        margin: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 16,
+                        ),
+                        child: const Icon(
+                          Icons.delete,
+                          color: Colors.white,
+                          size: 40,
+                        ),
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        side: isDarkMode
-                            ? const BorderSide(color: Colors.amber, width: 1)
-                            : BorderSide.none,
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          radius: 30,
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.primary,
-                          foregroundColor: Theme.of(
-                            context,
-                          ).colorScheme.onPrimary,
-                          child: Icon(
-                            _categoryIcons[tx.category] ?? Icons.category,
-                            size: 30,
-                          ),
-                        ),
-                        title: Text(
-                          tx.title,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        subtitle: Text(
-                          "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}",
-                          style: TextStyle(
-                            color: Theme.of(context).textTheme.bodySmall?.color,
-                          ),
-                        ),
-                        // --- QUI ABBIAMO AGGIUNTO IL TASTO MODIFICA ---
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize
-                              .min, // Occupa il minimo spazio possibile
-                          children: [
-                            Text(
-                              '€${tx.amount.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
+                      direction: DismissDirection
+                          .endToStart, // Solo da destra a sinistra
+                      // QUESTO È IL POPUP DI CONFERMA
+                      confirmDismiss: (direction) {
+                        return showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Sei sicuro?'),
+                            content: const Text(
+                              'Vuoi eliminare questa spesa definitivamente?',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.of(
+                                    ctx,
+                                  ).pop(false); // NO -> Non cancellare
+                                },
+                                child: const Text('No'),
                               ),
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.of(ctx).pop(true); // SI -> Procedi
+                                },
+                                child: const Text('Sì, elimina'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+
+                      // SE L'UTENTE DICE SÌ, CANCELLIAMO DAVVERO
+                      onDismissed: (direction) {
+                        _deleteTransaction(tx.id);
+                      },
+
+                      child: Card(
+                        elevation: isDarkMode ? 2 : 4,
+                        color: isDarkMode ? Colors.grey.shade900 : null,
+                        margin: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 16,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                          side: isDarkMode
+                              ? const BorderSide(color: Colors.amber, width: 1)
+                              : BorderSide.none,
+                        ),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            radius: 30,
+                            backgroundColor: Theme.of(
+                              context,
+                            ).colorScheme.primary,
+                            foregroundColor: Theme.of(
+                              context,
+                            ).colorScheme.onPrimary,
+                            child: Icon(
+                              _categoryIcons[tx.category] ?? Icons.category,
+                              size: 30,
                             ),
-                            // Tasto Modifica (Matita)
-                            IconButton(
-                              icon: const Icon(Icons.edit),
-                              color: Colors.blue, // Colore blu per la modifica
-                              onPressed: () =>
-                                  _startEditTransaction(context, tx),
+                          ),
+                          title: Text(
+                            tx.title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
-                            // Tasto Cancella (Cestino)
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline),
-                              color: Theme.of(context).colorScheme.error,
-                              onPressed: () => _deleteTransaction(tx.id),
+                          ),
+                          subtitle: Text(
+                            "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}",
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).textTheme.bodySmall?.color,
                             ),
-                          ],
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '€${tx.amount.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              // Abbiamo tolto il cestino, lasciamo solo la matita!
+                              IconButton(
+                                icon: const Icon(Icons.edit),
+                                color: Colors.blue,
+                                onPressed: () =>
+                                    _startEditTransaction(context, tx),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     );
