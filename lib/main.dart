@@ -7,7 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import './models/transaction.dart';
 import './widgets/new_transaction.dart';
-import './widgets/chart.dart';
+import './widgets/chart_carousel.dart'; // <--- IMPORTIAMO IL NUOVO WIDGET
 import './screens/login_screen.dart';
 
 void main() async {
@@ -128,6 +128,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedChartPeriod = 0;
+  // NOTA: Abbiamo tolto _pageController da qui!
 
   final Map<String, IconData> _categoryIcons = {
     'Cibo': Icons.fastfood,
@@ -322,26 +323,23 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
 
-              SizedBox(
-                height: 180,
-                child: Chart(recentForChart, _selectedChartPeriod),
+              // --- QUI USIAMO IL NUOVO WIDGET CHE NON SI BUGGA ---
+              ChartCarousel(
+                recentTransactions: recentForChart,
+                selectedPeriodIndex: _selectedChartPeriod,
               ),
+
+              const SizedBox(height: 10),
 
               Expanded(
                 child: ListView.builder(
                   itemCount: loadedTransactions.length,
                   itemBuilder: (ctx, index) {
                     final tx = loadedTransactions[index];
-
-                    // --- DISMISSIBLE: SWIPE PER CANCELLARE ---
                     return Dismissible(
-                      key: ValueKey(
-                        tx.id,
-                      ), // Chiave univoca per identificare l'elemento
+                      key: ValueKey(tx.id),
                       background: Container(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.error, // Sfondo Rosso
+                        color: Theme.of(context).colorScheme.error,
                         alignment: Alignment.centerRight,
                         padding: const EdgeInsets.only(right: 20),
                         margin: const EdgeInsets.symmetric(
@@ -354,9 +352,7 @@ class _HomePageState extends State<HomePage> {
                           size: 40,
                         ),
                       ),
-                      direction: DismissDirection
-                          .endToStart, // Solo da destra a sinistra
-                      // QUESTO È IL POPUP DI CONFERMA
+                      direction: DismissDirection.endToStart,
                       confirmDismiss: (direction) {
                         return showDialog(
                           context: context,
@@ -368,15 +364,13 @@ class _HomePageState extends State<HomePage> {
                             actions: [
                               TextButton(
                                 onPressed: () {
-                                  Navigator.of(
-                                    ctx,
-                                  ).pop(false); // NO -> Non cancellare
+                                  Navigator.of(ctx).pop(false);
                                 },
                                 child: const Text('No'),
                               ),
                               TextButton(
                                 onPressed: () {
-                                  Navigator.of(ctx).pop(true); // SI -> Procedi
+                                  Navigator.of(ctx).pop(true);
                                 },
                                 child: const Text('Sì, elimina'),
                               ),
@@ -384,8 +378,6 @@ class _HomePageState extends State<HomePage> {
                           ),
                         );
                       },
-
-                      // SE L'UTENTE DICE SÌ, CANCELLIAMO DAVVERO
                       onDismissed: (direction) {
                         _deleteTransaction(tx.id);
                       },
@@ -442,7 +434,6 @@ class _HomePageState extends State<HomePage> {
                                   fontSize: 15,
                                 ),
                               ),
-                              // Abbiamo tolto il cestino, lasciamo solo la matita!
                               IconButton(
                                 icon: const Icon(Icons.edit),
                                 color: Colors.blue,
