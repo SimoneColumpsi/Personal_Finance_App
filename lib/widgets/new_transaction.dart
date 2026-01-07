@@ -2,25 +2,33 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class NewTransaction extends StatefulWidget {
-  // Ora la funzione accetta anche la Stringa della categoria!
   final Function(String, double, DateTime, String) addTx;
 
-  const NewTransaction(this.addTx, {super.key});
+  // --- NUOVI PARAMETRI OPZIONALI PER LA MODIFICA ---
+  final String? existingTitle;
+  final double? existingAmount;
+  final DateTime? existingDate;
+  final String? existingCategory;
+
+  const NewTransaction(
+    this.addTx, {
+    this.existingTitle,
+    this.existingAmount,
+    this.existingDate,
+    this.existingCategory,
+    super.key,
+  });
 
   @override
   State<NewTransaction> createState() => _NewTransactionState();
 }
 
 class _NewTransactionState extends State<NewTransaction> {
-  final _titleController = TextEditingController();
-  final _amountController = TextEditingController();
+  late TextEditingController _titleController;
+  late TextEditingController _amountController;
   DateTime? _selectedDate;
-
-  // Questa variabile tiene in memoria la scelta dell'utente
-  // Impostiamo 'Altro' come valore di partenza
   String _selectedCategory = 'Altro';
 
-  // Lista delle categorie disponibili
   final List<String> _categories = [
     'Cibo',
     'Trasporti',
@@ -29,12 +37,38 @@ class _NewTransactionState extends State<NewTransaction> {
     'Altro',
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    // Se ci sono dati esistenti (MODIFICA), riempiamo i campi!
+    if (widget.existingTitle != null) {
+      _titleController = TextEditingController(text: widget.existingTitle);
+      _amountController = TextEditingController(
+        text: widget.existingAmount.toString(),
+      );
+      _selectedDate = widget.existingDate;
+      _selectedCategory = widget.existingCategory ?? 'Altro';
+    } else {
+      // Se non ci sono dati (NUOVA SPESA), partiamo vuoti
+      _titleController = TextEditingController();
+      _amountController = TextEditingController();
+    }
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _amountController.dispose();
+    super.dispose();
+  }
+
   void _submitData() {
     if (_amountController.text.isEmpty) {
       return;
     }
 
     final enteredTitle = _titleController.text;
+    // Gestione virgola/punto
     final enteredAmount = double.parse(
       _amountController.text.replaceAll(',', '.'),
     );
@@ -43,7 +77,6 @@ class _NewTransactionState extends State<NewTransaction> {
       return;
     }
 
-    // Passiamo anche la categoria selezionata (_selectedCategory) a main.dart
     widget.addTx(
       enteredTitle,
       enteredAmount,
@@ -57,7 +90,8 @@ class _NewTransactionState extends State<NewTransaction> {
   void _presentDatePicker() {
     showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
+      initialDate:
+          _selectedDate ?? DateTime.now(), // Parte dalla data salvata o da oggi
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
       locale: const Locale("it", "IT"),
@@ -79,7 +113,7 @@ class _NewTransactionState extends State<NewTransaction> {
         padding: const EdgeInsets.all(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min, // Importante per il modale
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             TextField(
               decoration: const InputDecoration(labelText: 'Titolo'),
@@ -95,13 +129,11 @@ class _NewTransactionState extends State<NewTransaction> {
               onSubmitted: (_) => _submitData(),
             ),
 
-            // --- SELETTORE DATA E CATEGORIA ---
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 20),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Selettore Data
                   Row(
                     children: [
                       Text(
@@ -122,13 +154,12 @@ class _NewTransactionState extends State<NewTransaction> {
               ),
             ),
 
-            // --- MENU A TENDINA (DROPDOWN) ---
             Row(
               children: [
                 const Text("Categoria: ", style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 15),
                 DropdownButton<String>(
-                  value: _selectedCategory, // Valore attuale
+                  value: _selectedCategory,
                   icon: const Icon(Icons.arrow_downward),
                   elevation: 16,
                   underline: Container(
@@ -136,12 +167,10 @@ class _NewTransactionState extends State<NewTransaction> {
                     color: Theme.of(context).primaryColor,
                   ),
                   onChanged: (String? newValue) {
-                    // Quando l'utente cambia scelta, aggiorniamo la variabile
                     setState(() {
                       _selectedCategory = newValue!;
                     });
                   },
-                  // Creiamo la lista delle opzioni
                   items: _categories.map<DropdownMenuItem<String>>((
                     String value,
                   ) {
@@ -157,7 +186,12 @@ class _NewTransactionState extends State<NewTransaction> {
 
             ElevatedButton(
               onPressed: _submitData,
-              child: const Text('Aggiungi Transazione'),
+              // Cambiamo il testo del bottone se stiamo modificando
+              child: Text(
+                widget.existingTitle != null
+                    ? 'Salva Modifiche'
+                    : 'Aggiungi Transazione',
+              ),
             ),
           ],
         ),

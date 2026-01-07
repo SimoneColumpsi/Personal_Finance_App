@@ -48,9 +48,7 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('it', 'IT'), // Diciamo all'app che supportiamo l'Italiano
-      ],
+      supportedLocales: const [Locale('it', 'IT')],
       themeMode: _themeMode,
       theme: ThemeData(
         useMaterial3: true,
@@ -131,7 +129,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _selectedChartPeriod = 0;
 
-  // Mappa per convertire il testo della categoria in un'icona
   final Map<String, IconData> _categoryIcons = {
     'Cibo': Icons.fastfood,
     'Trasporti': Icons.directions_car,
@@ -140,7 +137,6 @@ class _HomePageState extends State<HomePage> {
     'Altro': Icons.category,
   };
 
-  // Funzione aggiornata: ora accetta anche la categoria!
   void _addNewTransaction(
     String txTitle,
     double txAmount,
@@ -154,8 +150,24 @@ class _HomePageState extends State<HomePage> {
       'title': txTitle,
       'amount': txAmount,
       'date': chosenDate,
-      'category': txCategory, // <--- SALVIAMO LA CATEGORIA
+      'category': txCategory,
       'userId': user.uid,
+    });
+  }
+
+  // --- FUNZIONE PER MODIFICARE (UPDATE) ---
+  void _editTransactionFirebase(
+    String id,
+    String txTitle,
+    double txAmount,
+    DateTime chosenDate,
+    String txCategory,
+  ) {
+    FirebaseFirestore.instance.collection('expenses').doc(id).update({
+      'title': txTitle,
+      'amount': txAmount,
+      'date': chosenDate,
+      'category': txCategory,
     });
   }
 
@@ -173,6 +185,31 @@ class _HomePageState extends State<HomePage> {
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
           ),
           child: NewTransaction(_addNewTransaction),
+        );
+      },
+    );
+  }
+
+  // --- APRE IL MODALE IN MODALITÀ MODIFICA ---
+  void _startEditTransaction(BuildContext ctx, Transaction tx) {
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      builder: (_) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          // Passiamo i dati esistenti al modulo
+          child: NewTransaction(
+            // Qui creiamo una funzione "ponte" che chiama l'update usando l'ID della spesa
+            (title, amount, date, category) =>
+                _editTransactionFirebase(tx.id, title, amount, date, category),
+            existingTitle: tx.title,
+            existingAmount: tx.amount,
+            existingDate: tx.date,
+            existingCategory: tx.category,
+          ),
         );
       },
     );
@@ -252,7 +289,6 @@ class _HomePageState extends State<HomePage> {
               title: data['title'],
               amount: data['amount'],
               date: (data['date'] as Timestamp).toDate(),
-              // TRUCCHETTO: Se 'category' non esiste (vecchie spese), usa 'Altro'
               category: data['category'] ?? 'Altro',
             );
           }).toList();
@@ -314,7 +350,6 @@ class _HomePageState extends State<HomePage> {
                             : BorderSide.none,
                       ),
                       child: ListTile(
-                        // NUOVO: Mostriamo l'icona della categoria!
                         leading: CircleAvatar(
                           radius: 30,
                           backgroundColor: Theme.of(
@@ -324,8 +359,7 @@ class _HomePageState extends State<HomePage> {
                             context,
                           ).colorScheme.onPrimary,
                           child: Icon(
-                            _categoryIcons[tx.category] ??
-                                Icons.category, // Icona o default
+                            _categoryIcons[tx.category] ?? Icons.category,
                             size: 30,
                           ),
                         ),
@@ -342,9 +376,10 @@ class _HomePageState extends State<HomePage> {
                             color: Theme.of(context).textTheme.bodySmall?.color,
                           ),
                         ),
-                        // Mostriamo il prezzo sulla destra
+                        // --- QUI ABBIAMO AGGIUNTO IL TASTO MODIFICA ---
                         trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
+                          mainAxisSize: MainAxisSize
+                              .min, // Occupa il minimo spazio possibile
                           children: [
                             Text(
                               '€${tx.amount.toStringAsFixed(2)}',
@@ -353,6 +388,14 @@ class _HomePageState extends State<HomePage> {
                                 fontSize: 15,
                               ),
                             ),
+                            // Tasto Modifica (Matita)
+                            IconButton(
+                              icon: const Icon(Icons.edit),
+                              color: Colors.blue, // Colore blu per la modifica
+                              onPressed: () =>
+                                  _startEditTransaction(context, tx),
+                            ),
+                            // Tasto Cancella (Cestino)
                             IconButton(
                               icon: const Icon(Icons.delete_outline),
                               color: Theme.of(context).colorScheme.error,
