@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
-// --- NUOVO COMPONENTE: IL FORM PER INSERIRE I DATI ---
 class NewTransaction extends StatefulWidget {
-  final Function(String, double, DateTime) addTx;
+  // Ora la funzione accetta anche la Stringa della categoria!
+  final Function(String, double, DateTime, String) addTx;
 
   const NewTransaction(this.addTx, {super.key});
 
@@ -13,42 +14,57 @@ class NewTransaction extends StatefulWidget {
 class _NewTransactionState extends State<NewTransaction> {
   final _titleController = TextEditingController();
   final _amountController = TextEditingController();
-  DateTime? _selectedDate; // Può essere null se l'utente non ha ancora scelto
+  DateTime? _selectedDate;
+
+  // Questa variabile tiene in memoria la scelta dell'utente
+  // Impostiamo 'Altro' come valore di partenza
+  String _selectedCategory = 'Altro';
+
+  // Lista delle categorie disponibili
+  final List<String> _categories = [
+    'Cibo',
+    'Trasporti',
+    'Svago',
+    'Casa',
+    'Altro',
+  ];
 
   void _submitData() {
     if (_amountController.text.isEmpty) {
       return;
     }
+
     final enteredTitle = _titleController.text;
     final enteredAmount = double.parse(
       _amountController.text.replaceAll(',', '.'),
     );
 
-    // Validazione: se manca titolo, prezzo o data, fermati!
     if (enteredTitle.isEmpty || enteredAmount <= 0 || _selectedDate == null) {
       return;
     }
 
-    // Passa i dati al componente padre (HomePage)
-    widget.addTx(enteredTitle, enteredAmount, _selectedDate!);
+    // Passiamo anche la categoria selezionata (_selectedCategory) a main.dart
+    widget.addTx(
+      enteredTitle,
+      enteredAmount,
+      _selectedDate!,
+      _selectedCategory,
+    );
 
-    // Chiudi il foglio
     Navigator.of(context).pop();
   }
 
-  // Funzione che apre il calendario di Android
   void _presentDatePicker() {
     showDatePicker(
       context: context,
       initialDate: DateTime.now(),
-      firstDate: DateTime(2025),
+      firstDate: DateTime(2024),
       lastDate: DateTime.now(),
+      locale: const Locale("it", "IT"),
     ).then((pickedDate) {
-      // Se l'utente preme annulla (pickedDate è null), non fare nulla
       if (pickedDate == null) {
         return;
       }
-      // Altrimenti aggiorna lo stato con la data scelta
       setState(() {
         _selectedDate = pickedDate;
       });
@@ -57,48 +73,94 @@ class _NewTransactionState extends State<NewTransaction> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          TextField(
-            decoration: const InputDecoration(labelText: 'Titolo Spesa'),
-            controller: _titleController,
-          ),
-          TextField(
-            decoration: const InputDecoration(labelText: 'Importo (€)'),
-            controller: _amountController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          ),
-          // RIGA PER LA DATA
-          SizedBox(
-            height: 70,
-            child: Row(
+    return Card(
+      elevation: 5,
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min, // Importante per il modale
+          children: <Widget>[
+            TextField(
+              decoration: const InputDecoration(labelText: 'Titolo'),
+              controller: _titleController,
+              onSubmitted: (_) => _submitData(),
+            ),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Importo (€)'),
+              controller: _amountController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onSubmitted: (_) => _submitData(),
+            ),
+
+            // --- SELETTORE DATA E CATEGORIA ---
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Selettore Data
+                  Row(
+                    children: [
+                      Text(
+                        _selectedDate == null
+                            ? 'Nessuna data scelta!'
+                            : 'Data: ${DateFormat('dd/MM/yyyy').format(_selectedDate!)}',
+                      ),
+                      TextButton(
+                        onPressed: _presentDatePicker,
+                        child: const Text(
+                          'Scegli Data',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // --- MENU A TENDINA (DROPDOWN) ---
+            Row(
               children: [
-                Expanded(
-                  child: Text(
-                    _selectedDate == null
-                        ? 'Nessuna data scelta!'
-                        : 'Data: ${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
+                const Text("Categoria: ", style: TextStyle(fontSize: 16)),
+                const SizedBox(width: 15),
+                DropdownButton<String>(
+                  value: _selectedCategory, // Valore attuale
+                  icon: const Icon(Icons.arrow_downward),
+                  elevation: 16,
+                  underline: Container(
+                    height: 2,
+                    color: Theme.of(context).primaryColor,
                   ),
-                ),
-                TextButton(
-                  onPressed: _presentDatePicker,
-                  child: const Text(
-                    'Scegli Data',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  onChanged: (String? newValue) {
+                    // Quando l'utente cambia scelta, aggiorniamo la variabile
+                    setState(() {
+                      _selectedCategory = newValue!;
+                    });
+                  },
+                  // Creiamo la lista delle opzioni
+                  items: _categories.map<DropdownMenuItem<String>>((
+                    String value,
+                  ) {
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
                 ),
               ],
             ),
-          ),
-          ElevatedButton(
-            onPressed: _submitData,
-            child: const Text('Aggiungi Transazione'),
-          ),
-        ],
+            const SizedBox(height: 20),
+
+            ElevatedButton(
+              onPressed: _submitData,
+              child: const Text('Aggiungi Transazione'),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-// IMPORTANTE: Nascondiamo Transaction di Firestore per usare la nostra
 import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import './models/transaction.dart';
 import './widgets/new_transaction.dart';
@@ -42,7 +42,15 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Gestione Spese',
+      title: 'Le Mie Spese',
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('it', 'IT'), // Diciamo all'app che supportiamo l'Italiano
+      ],
       themeMode: _themeMode,
       theme: ThemeData(
         useMaterial3: true,
@@ -94,7 +102,6 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
           style: TextButton.styleFrom(foregroundColor: Colors.amber),
         ),
       ),
-      // IL PORTIERE: Controlla se c'è un utente loggato
       home: StreamBuilder(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (ctx, snapshot) {
@@ -122,14 +129,23 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // 0 = Settimana, 1 = Mese, 2 = Anno
   int _selectedChartPeriod = 0;
 
-  // Funzione che invia i dati al Cloud
+  // Mappa per convertire il testo della categoria in un'icona
+  final Map<String, IconData> _categoryIcons = {
+    'Cibo': Icons.fastfood,
+    'Trasporti': Icons.directions_car,
+    'Svago': Icons.movie,
+    'Casa': Icons.home,
+    'Altro': Icons.category,
+  };
+
+  // Funzione aggiornata: ora accetta anche la categoria!
   void _addNewTransaction(
     String txTitle,
     double txAmount,
     DateTime chosenDate,
+    String txCategory,
   ) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -137,13 +153,12 @@ class _HomePageState extends State<HomePage> {
     FirebaseFirestore.instance.collection('expenses').add({
       'title': txTitle,
       'amount': txAmount,
-      'date': chosenDate, // Firebase lo convertirà in Timestamp
+      'date': chosenDate,
+      'category': txCategory, // <--- SALVIAMO LA CATEGORIA
       'userId': user.uid,
     });
-    // NON serve più setState locale, il StreamBuilder aggiornerà la lista da solo!
   }
 
-  // Funzione che cancella dal Cloud
   void _deleteTransaction(String id) {
     FirebaseFirestore.instance.collection('expenses').doc(id).delete();
   }
@@ -211,19 +226,16 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      // QUI C'È LA MAGIA: Ascoltiamo il database in tempo reale
       body: StreamBuilder(
         stream: FirebaseFirestore.instance
             .collection('expenses')
-            .where('userId', isEqualTo: user?.uid) // Prendi solo le MIE spese
+            .where('userId', isEqualTo: user?.uid)
             .snapshots(),
         builder: (ctx, snapshot) {
-          // 1. Se sta caricando i dati
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          // 2. Se non ci sono dati o lista vuota
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(
               child: Text(
@@ -233,22 +245,20 @@ class _HomePageState extends State<HomePage> {
             );
           }
 
-          // 3. Se ci sono dati, convertiamoli da "Documento Firebase" a "Transaction"
           final loadedTransactions = snapshot.data!.docs.map((doc) {
             final data = doc.data();
             return Transaction(
-              id: doc.id, // L'ID univoco del documento
+              id: doc.id,
               title: data['title'],
               amount: data['amount'],
-              // Convertiamo il Timestamp di Firebase in DateTime di Dart
               date: (data['date'] as Timestamp).toDate(),
+              // TRUCCHETTO: Se 'category' non esiste (vecchie spese), usa 'Altro'
+              category: data['category'] ?? 'Altro',
             );
           }).toList();
 
-          // Ordiniamo le spese dalla più recente alla più vecchia (in memoria)
           loadedTransactions.sort((a, b) => b.date.compareTo(a.date));
 
-          // Calcoliamo quali passare al grafico in base al filtro
           DateTime limitDate;
           if (_selectedChartPeriod == 0) {
             limitDate = DateTime.now().subtract(const Duration(days: 7));
@@ -262,11 +272,9 @@ class _HomePageState extends State<HomePage> {
             return tx.date.isAfter(limitDate);
           }).toList();
 
-          // 4. Mostriamo la schermata con i dati scaricati
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Filtri
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
@@ -282,13 +290,11 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
 
-              // Grafico
               SizedBox(
                 height: 180,
                 child: Chart(recentForChart, _selectedChartPeriod),
               ),
 
-              // Lista
               Expanded(
                 child: ListView.builder(
                   itemCount: loadedTransactions.length,
@@ -308,6 +314,7 @@ class _HomePageState extends State<HomePage> {
                             : BorderSide.none,
                       ),
                       child: ListTile(
+                        // NUOVO: Mostriamo l'icona della categoria!
                         leading: CircleAvatar(
                           radius: 30,
                           backgroundColor: Theme.of(
@@ -316,11 +323,10 @@ class _HomePageState extends State<HomePage> {
                           foregroundColor: Theme.of(
                             context,
                           ).colorScheme.onPrimary,
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: FittedBox(
-                              child: Text('€${tx.amount.toStringAsFixed(2)}'),
-                            ),
+                          child: Icon(
+                            _categoryIcons[tx.category] ??
+                                Icons.category, // Icona o default
+                            size: 30,
                           ),
                         ),
                         title: Text(
@@ -331,15 +337,28 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         subtitle: Text(
-                          "${tx.date.day}/${tx.date.month}/${tx.date.year}",
+                          "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}",
                           style: TextStyle(
                             color: Theme.of(context).textTheme.bodySmall?.color,
                           ),
                         ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          color: Theme.of(context).colorScheme.error,
-                          onPressed: () => _deleteTransaction(tx.id),
+                        // Mostriamo il prezzo sulla destra
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '€${tx.amount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              color: Theme.of(context).colorScheme.error,
+                              onPressed: () => _deleteTransaction(tx.id),
+                            ),
+                          ],
                         ),
                       ),
                     );
