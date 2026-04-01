@@ -43,9 +43,9 @@ class Chart extends StatelessWidget {
         var totalSum = 0.0;
         String label = '';
 
-        if (index == 0)
+        if (index == 0) {
           label = '1-7';
-        else if (index == 1)
+        } else if (index == 1)
           label = '8-14';
         else if (index == 2)
           label = '15-21';

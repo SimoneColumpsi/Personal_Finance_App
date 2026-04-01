@@ -9,10 +9,13 @@ import './models/transaction.dart';
 import './widgets/new_transaction.dart';
 import './widgets/chart_carousel.dart'; // <--- IMPORTIAMO IL NUOVO WIDGET
 import './screens/login_screen.dart';
+import './services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  await NotificationService.init();
 
   initializeDateFormatting('it_IT', null).then((_) {
     runApp(const PersonalFinanceApp());
