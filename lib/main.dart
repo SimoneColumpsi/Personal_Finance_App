@@ -12,6 +12,7 @@ import './screens/login_screen.dart';
 import './services/notification_service.dart';
 import './screens/balance_screen.dart'; 
 import './screens/analytics_screen.dart';
+import './screens/settings_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -274,6 +275,7 @@ class _HomePageState extends State<HomePage> {
             itemBuilder: (ctx, index) => _buildTransactionItem(context, loadedTransactions[index], isDarkMode),
           ),
           AnalyticsScreen(loadedTransactions), // 2: Grafici
+          const SettingsScreen(),
           ];
 
         return Scaffold(
@@ -330,11 +332,11 @@ class _HomePageState extends State<HomePage> {
                     color: _selectedPageIndex == 2 ? Colors.teal : Colors.grey),
                   onPressed: () => _selectPage(2),
                 ),
-                // Ho aggiunto un'icona "Profilo" o "Finta" per bilanciare i 4 angoli
                 IconButton(
-                  icon: const Icon(Icons.person, color: Colors.grey),
-                  onPressed: () {}, 
-                ),
+                  icon: Icon(Icons.settings, 
+                    color: _selectedPageIndex == 3 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(3),
+                ), 
               ],
             ),
           ),
@@ -380,7 +382,7 @@ class _HomePageState extends State<HomePage> {
             // Cambiamo il colore del cerchio: verde se entrata, il colore primario se spesa
             backgroundColor: tx.isIncome 
                 ? Colors.green.withOpacity(0.8) 
-                : Theme.of(context).colorScheme.primary,
+                : Colors.redAccent.withOpacity(0.7),
             foregroundColor: Colors.white,
             child: Icon(
               _categoryIcons[tx.category] ?? Icons.category, 
