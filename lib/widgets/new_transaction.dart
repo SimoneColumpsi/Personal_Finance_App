@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class NewTransaction extends StatefulWidget {
-  final Function(String, double, DateTime, String) addTx;
+  final Function(String, double, DateTime, String, bool) addTx;
 
   // --- NUOVI PARAMETRI OPZIONALI PER LA MODIFICA ---
   final String? existingTitle;
   final double? existingAmount;
   final DateTime? existingDate;
   final String? existingCategory;
+  final bool existingIsIncome;
 
   const NewTransaction(
     this.addTx, {
@@ -17,6 +18,7 @@ class NewTransaction extends StatefulWidget {
     this.existingDate,
     this.existingCategory,
     super.key,
+    this.existingIsIncome = false,
   });
 
   @override
@@ -28,14 +30,10 @@ class _NewTransactionState extends State<NewTransaction> {
   late TextEditingController _amountController;
   DateTime? _selectedDate;
   String _selectedCategory = 'Altro';
+  bool _isIncome = false; 
 
-  final List<String> _categories = [
-    'Cibo',
-    'Trasporti',
-    'Svago',
-    'Casa',
-    'Altro',
-  ];
+final List<String> _expenseCategories = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
+final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
 
   @override
   void initState() {
@@ -48,10 +46,12 @@ class _NewTransactionState extends State<NewTransaction> {
       );
       _selectedDate = widget.existingDate;
       _selectedCategory = widget.existingCategory ?? 'Altro';
+      _isIncome = widget.existingIsIncome ?? false;
     } else {
       // Se non ci sono dati (NUOVA SPESA), partiamo vuoti
       _titleController = TextEditingController();
       _amountController = TextEditingController();
+      _isIncome = false;
     }
   }
 
@@ -82,6 +82,7 @@ class _NewTransactionState extends State<NewTransaction> {
       enteredAmount,
       _selectedDate!,
       _selectedCategory,
+      _isIncome,
     );
 
     Navigator.of(context).pop();
@@ -112,90 +113,80 @@ class _NewTransactionState extends State<NewTransaction> {
       child: Container(
         padding: const EdgeInsets.all(10),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            // 1. SCELTA TIPO (ENTRATA O SPESA)
+            const Text("Tipo di operazione:", style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildTypeButton("SPESA", false, Colors.red),
+                const SizedBox(width: 20),
+                _buildTypeButton("ENTRATA", true, Colors.green),
+              ],
+            ),
+            const Divider(height: 30),
+
+            // 2. CAMPI TESTUALI
             TextField(
               decoration: const InputDecoration(labelText: 'Titolo'),
               controller: _titleController,
-              onSubmitted: (_) => _submitData(),
             ),
             TextField(
               decoration: const InputDecoration(labelText: 'Importo (€)'),
               controller: _amountController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              onSubmitted: (_) => _submitData(),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
 
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        _selectedDate == null
-                            ? 'Nessuna data scelta!'
-                            : 'Data: ${DateFormat('dd/MM/yyyy').format(_selectedDate!)}',
-                      ),
-                      TextButton(
-                        onPressed: _presentDatePicker,
-                        child: const Text(
-                          'Scegli Data',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
+            // 3. DATA E CATEGORIA
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("Categoria: ", style: TextStyle(fontSize: 16)),
-                const SizedBox(width: 15),
+                TextButton(
+                  onPressed: _presentDatePicker,
+                  child: Text(_selectedDate == null 
+                    ? 'Scegli Data' 
+                    : DateFormat('dd/MM/yyyy').format(_selectedDate!)),
+                ),
                 DropdownButton<String>(
                   value: _selectedCategory,
-                  icon: const Icon(Icons.arrow_downward),
-                  elevation: 16,
-                  underline: Container(
-                    height: 2,
-                    color: Theme.of(context).primaryColor,
-                  ),
-                  onChanged: (String? newValue) {
-                    setState(() {
-                      _selectedCategory = newValue!;
-                    });
-                  },
-                  items: _categories.map<DropdownMenuItem<String>>((
-                    String value,
-                  ) {
-                    return DropdownMenuItem<String>(
-                      value: value,
-                      child: Text(value),
-                    );
-                  }).toList(),
+                  onChanged: (val) => setState(() => _selectedCategory = val!),
+                  // CAMBIO DINAMICO DELLE CATEGORIE
+                  items: (_isIncome ? _incomeCategories : _expenseCategories)
+                      .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
+                      .toList(),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
 
+            const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _submitData,
-              // Cambiamo il testo del bottone se stiamo modificando
-              child: Text(
-                widget.existingTitle != null
-                    ? 'Salva Modifiche'
-                    : 'Aggiungi Transazione',
-              ),
+              child: const Text('Conferma'),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // Helper per i pulsanti di scelta tipo
+  Widget _buildTypeButton(String label, bool isIncomeType, Color color) {
+    bool isSelected = _isIncome == isIncomeType;
+    return ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? color : Colors.grey.shade300,
+        foregroundColor: isSelected ? Colors.white : Colors.black54,
+      ),
+      onPressed: () {
+        setState(() {
+          _isIncome = isIncomeType;
+          // Reset della categoria quando si cambia tipo per evitare errori
+          _selectedCategory = isIncomeType ? _incomeCategories[0] : _expenseCategories[0];
+        });
+      },
+      child: Text(label),
     );
   }
 }

@@ -5,6 +5,7 @@ class Transaction {
   final double amount;
   final DateTime date;
   final String category;
+  final bool isIncome;
 
   Transaction({
     required this.id,
@@ -12,5 +13,6 @@ class Transaction {
     required this.amount,
     required this.date,
     required this.category,
+    this.isIncome = false,
   });
 }

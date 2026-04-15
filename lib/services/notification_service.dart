@@ -45,7 +45,7 @@ class NotificationService {
 
     // 4. Programma e mostra test
     await scheduleDailyNotifications();
-    await _showInstantTest();
+    // await _showInstantTest();
     await _showImmediateTest(); // Aggiunto test immediato
   }
 
@@ -67,30 +67,30 @@ class NotificationService {
     debugPrint("✅ _showImmediateTest() completata");
   }
 
-  static Future<void> _showInstantTest() async {
-    await _notificationsPlugin.show(
-      id: 888,
-      title: "Sistema Pronto! 🚀",
-      body: "Inizializzato con successo.",
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'spese_channel_v3',
-          'Promemoria Spese',
-          importance: Importance.max,
-          priority: Priority.high,
-        ),
-      ),
-    );
-  }
+  // static Future<void> _showInstantTest() async {
+  //   await _notificationsPlugin.show(
+  //     id: 888,
+  //     title: "Sistema Pronto! 🚀",
+  //     body: "Inizializzato con successo.",
+  //     notificationDetails: const NotificationDetails(
+  //       android: AndroidNotificationDetails(
+  //         'spese_channel_v3',
+  //         'Promemoria Spese',
+  //         importance: Importance.max,
+  //         priority: Priority.high,
+  //       ),
+  //     ),
+  //   );
+  // }
 
   static Future<void> scheduleDailyNotifications() async {
     await _notificationsPlugin.cancelAll();
 
     // Notifiche giornaliere programmate
-    await _schedule(id: 199, title: "Promemoria!", body: "Segna le spese", hour: 16, minute: 22);
-    await _schedule(id: 11, title: "Buongiorno! ☕", body: "Spese colazione?", hour: 9, minute: 0);
-    await _schedule(id: 12, title: "Pausa pranzo? 🥪", body: "Segna le spese!", hour: 15, minute: 0);
-    await _schedule(id: 13, title: "Fine giornata! 🌙", body: "Ultime spese?", hour: 21, minute: 30);
+    // await _schedule(id: 199, title: "Promemoria!", body: "Segna le spese", hour: 16, minute: 22);
+    await _schedule(id: 1, title: "Buongiorno! ☕", body: "Spese colazione?", hour: 9, minute: 0);
+    await _schedule(id: 2, title: "Pausa pranzo? 🥪", body: "Segna le spese!", hour: 15, minute: 0);
+    await _schedule(id: 3, title: "Fine giornata! 🌙", body: "Ultime spese?", hour: 21, minute: 30);
   }
 
   static Future<void> _schedule({

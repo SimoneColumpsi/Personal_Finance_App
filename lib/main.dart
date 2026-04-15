@@ -7,14 +7,15 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import './models/transaction.dart';
 import './widgets/new_transaction.dart';
-import './widgets/chart_carousel.dart'; // <--- IMPORTIAMO IL NUOVO WIDGET
+import './widgets/chart_carousel.dart'; 
 import './screens/login_screen.dart';
 import './services/notification_service.dart';
+import './screens/balance_screen.dart'; 
+import './screens/analytics_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-
   await NotificationService.init();
 
   initializeDateFormatting('it_IT', null).then((_) {
@@ -34,11 +35,7 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
 
   void _toggleTheme() {
     setState(() {
-      if (_themeMode == ThemeMode.light) {
-        _themeMode = ThemeMode.dark;
-      } else {
-        _themeMode = ThemeMode.light;
-      }
+      _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     });
   }
 
@@ -131,7 +128,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedChartPeriod = 0;
-  // NOTA: Abbiamo tolto _pageController da qui!
+  int _selectedPageIndex = 1; // 1 = Home (Lista), 0 = Saldo
+
+  void _selectPage(int index) {
+    setState(() {
+      _selectedPageIndex = index;
+    });
+  }
 
   final Map<String, IconData> _categoryIcons = {
     'Cibo': Icons.fastfood,
@@ -139,33 +142,28 @@ class _HomePageState extends State<HomePage> {
     'Svago': Icons.movie,
     'Casa': Icons.home,
     'Altro': Icons.category,
+
+
+    'Stipendio': Icons.payments,        // Icona banconote
+    'Regalo': Icons.card_giftcard,     // Icona pacco regalo
+    'Vendita': Icons.sell,             // Icona cartellino prezzo
+    'Bonus': Icons.redeem,
   };
 
-  void _addNewTransaction(
-    String txTitle,
-    double txAmount,
-    DateTime chosenDate,
-    String txCategory,
-  ) {
+  void _addNewTransaction(String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-
     FirebaseFirestore.instance.collection('expenses').add({
       'title': txTitle,
       'amount': txAmount,
       'date': chosenDate,
       'category': txCategory,
+      'isIncome': isIncome,
       'userId': user.uid,
     });
   }
 
-  void _editTransactionFirebase(
-    String id,
-    String txTitle,
-    double txAmount,
-    DateTime chosenDate,
-    String txCategory,
-  ) {
+  void _editTransactionFirebase(String id, String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome) {
     FirebaseFirestore.instance.collection('expenses').doc(id).update({
       'title': txTitle,
       'amount': txAmount,
@@ -182,14 +180,10 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
-      builder: (_) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: NewTransaction(_addNewTransaction),
-        );
-      },
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: NewTransaction(_addNewTransaction),
+      ),
     );
   }
 
@@ -197,21 +191,17 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
-      builder: (_) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: NewTransaction(
-            (title, amount, date, category) =>
-                _editTransactionFirebase(tx.id, title, amount, date, category),
-            existingTitle: tx.title,
-            existingAmount: tx.amount,
-            existingDate: tx.date,
-            existingCategory: tx.category,
-          ),
-        );
-      },
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: NewTransaction(
+          (title, amount, date, category, isIncome) => _editTransactionFirebase(tx.id, title, amount, date, category, isIncome),
+          existingTitle: tx.title,
+          existingAmount: tx.amount,
+          existingDate: tx.date,
+          existingCategory: tx.category,
+          existingIsIncome: tx.isIncome,
+        ),
+      ),
     );
   }
 
@@ -220,21 +210,11 @@ class _HomePageState extends State<HomePage> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: OutlinedButton(
-        onPressed: () {
-          setState(() {
-            _selectedChartPeriod = index;
-          });
-        },
+        onPressed: () => setState(() => _selectedChartPeriod = index),
         style: OutlinedButton.styleFrom(
-          backgroundColor: isSelected
-              ? Theme.of(context).colorScheme.secondary
-              : null,
-          foregroundColor: isSelected
-              ? Colors.black
-              : Theme.of(context).colorScheme.onSurface,
-          side: BorderSide(
-            color: isSelected ? Colors.transparent : Colors.grey,
-          ),
+          backgroundColor: isSelected ? Theme.of(context).colorScheme.secondary : null,
+          foregroundColor: isSelected ? Colors.black : Theme.of(context).colorScheme.onSurface,
+          side: BorderSide(color: isSelected ? Colors.transparent : Colors.grey),
         ),
         child: Text(title),
       ),
@@ -246,242 +226,194 @@ class _HomePageState extends State<HomePage> {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final user = FirebaseAuth.instance.currentUser;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'LE MIE SPESE',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            onPressed: widget.changeTheme,
-            icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
+    return StreamBuilder(
+      stream: FirebaseFirestore.instance
+          .collection('expenses')
+          .where('userId', isEqualTo: user?.uid)
+          .orderBy('date', descending: true)
+          .snapshots(),
+      builder: (ctx, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        final loadedTransactions = docs.map((doc) {
+          final data = doc.data();
+          return Transaction(
+            id: doc.id,
+            title: data['title'],
+            amount: (data['amount'] as num).toDouble(),
+            date: (data['date'] as Timestamp).toDate(),
+            category: data['category'] ?? 'Altro',
+            isIncome: data['isIncome'] ?? false,
+          );
+        }).toList();
+
+        loadedTransactions.sort((a, b) => b.date.compareTo(a.date));
+
+        // Logica filtri per grafici
+        final now = DateTime.now();
+        List<Transaction> recentForChart = [];
+        if (_selectedChartPeriod == 0) {
+          final monday = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+          recentForChart = loadedTransactions.where((tx) => tx.date.isAfter(monday) || tx.date.isAtSameMomentAs(monday)).toList();
+        } else if (_selectedChartPeriod == 1) {
+          final firstDay = DateTime(now.year, now.month, 1);
+          recentForChart = loadedTransactions.where((tx) => tx.date.isAfter(firstDay) || tx.date.isAtSameMomentAs(firstDay)).toList();
+        } else {
+          final firstYear = DateTime(now.year, 1, 1);
+          recentForChart = loadedTransactions.where((tx) => tx.date.isAfter(firstYear) || tx.date.isAtSameMomentAs(firstYear)).toList();
+        }
+
+        // --- DEFINIZIONE PAGINE ---
+        final List<Widget> pages = [
+          BalanceScreen(loadedTransactions), // Indice 0
+          ListView.builder(
+            itemCount: loadedTransactions.length,
+            itemBuilder: (ctx, index) => _buildTransactionItem(context, loadedTransactions[index], isDarkMode),
           ),
-          IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            onPressed: () => FirebaseAuth.instance.signOut(),
-          ),
-        ],
-      ),
-      body: StreamBuilder(
-        stream: FirebaseFirestore.instance
-            .collection('expenses')
-            .where('userId', isEqualTo: user?.uid)
-            .snapshots(),
-        builder: (ctx, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          AnalyticsScreen(loadedTransactions), // 2: Grafici
+          ];
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Text(
-                "Nessuna spesa nel cloud!",
-                style: TextStyle(fontSize: 18, color: Colors.grey),
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              _selectedPageIndex == 0 
+                  ? 'ANALISI SALDO' 
+                  : _selectedPageIndex == 1 
+                      ? 'LE MIE SPESE' 
+                      : 'STATISTICHE',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            actions: [
+              IconButton(
+                onPressed: widget.changeTheme,
+                icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
               ),
-            );
-          }
-
-          final loadedTransactions = snapshot.data!.docs.map((doc) {
-            final data = doc.data();
-            return Transaction(
-              id: doc.id,
-              title: data['title'],
-              amount: data['amount'],
-              date: (data['date'] as Timestamp).toDate(),
-              category: data['category'] ?? 'Altro',
-            );
-          }).toList();
-
-          loadedTransactions.sort((a, b) => b.date.compareTo(a.date));
-
-          // --- INIZIO NUOVA LOGICA CALENDARIO ---
-          final now = DateTime.now();
-          List<Transaction> recentForChart = [];
-
-          if (_selectedChartPeriod == 0) {
-            // SETTIMANA: Dal Lunedì corrente in poi
-            final mondayThisWeek = DateTime(
-              now.year,
-              now.month,
-              now.day,
-            ).subtract(Duration(days: now.weekday - 1));
-
-            recentForChart = loadedTransactions.where((tx) {
-              return tx.date.isAfter(mondayThisWeek) ||
-                  tx.date.isAtSameMomentAs(mondayThisWeek);
-            }).toList();
-          } else if (_selectedChartPeriod == 1) {
-            // MESE: Dal 1° del mese in poi
-            final firstDayOfMonth = DateTime(now.year, now.month, 1);
-
-            recentForChart = loadedTransactions.where((tx) {
-              return tx.date.isAfter(firstDayOfMonth) ||
-                  tx.date.isAtSameMomentAs(firstDayOfMonth);
-            }).toList();
-          } else {
-            // ANNO: Dal 1° Gennaio in poi
-            final firstDayOfYear = DateTime(now.year, 1, 1);
-
-            recentForChart = loadedTransactions.where((tx) {
-              return tx.date.isAfter(firstDayOfYear) ||
-                  tx.date.isAtSameMomentAs(firstDayOfYear);
-            }).toList();
-          }
-          // --- FINE NUOVA LOGICA ---
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildFilterButton('Settimana', 0),
-                    _buildFilterButton('Mese', 1),
-                    _buildFilterButton('Anno', 2),
-                  ],
-                ),
-              ),
-
-              // --- QUI USIAMO IL NUOVO WIDGET CHE NON SI BUGGA ---
-              ChartCarousel(
-                recentTransactions: recentForChart,
-                selectedPeriodIndex: _selectedChartPeriod,
-              ),
-
-              const SizedBox(height: 10),
-
-              Expanded(
-                child: ListView.builder(
-                  itemCount: loadedTransactions.length,
-                  itemBuilder: (ctx, index) {
-                    final tx = loadedTransactions[index];
-                    return Dismissible(
-                      key: ValueKey(tx.id),
-                      background: Container(
-                        color: Theme.of(context).colorScheme.error,
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
-                        margin: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 16,
-                        ),
-                        child: const Icon(
-                          Icons.delete,
-                          color: Colors.white,
-                          size: 40,
-                        ),
-                      ),
-                      direction: DismissDirection.endToStart,
-                      confirmDismiss: (direction) {
-                        return showDialog(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Sei sicuro?'),
-                            content: const Text(
-                              'Vuoi eliminare questa spesa definitivamente?',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () {
-                                  Navigator.of(ctx).pop(false);
-                                },
-                                child: const Text('No'),
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  Navigator.of(ctx).pop(true);
-                                },
-                                child: const Text('Sì, elimina'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                      onDismissed: (direction) {
-                        _deleteTransaction(tx.id);
-                      },
-
-                      child: Card(
-                        elevation: isDarkMode ? 2 : 4,
-                        color: isDarkMode ? Colors.grey.shade900 : null,
-                        margin: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                          side: isDarkMode
-                              ? const BorderSide(color: Colors.amber, width: 1)
-                              : BorderSide.none,
-                        ),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            radius: 30,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.primary,
-                            foregroundColor: Theme.of(
-                              context,
-                            ).colorScheme.onPrimary,
-                            child: Icon(
-                              _categoryIcons[tx.category] ?? Icons.category,
-                              size: 30,
-                            ),
-                          ),
-                          title: Text(
-                            tx.title,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          subtitle: Text(
-                            "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}",
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).textTheme.bodySmall?.color,
-                            ),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '€${tx.amount.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.edit),
-                                color: Colors.blue,
-                                onPressed: () =>
-                                    _startEditTransaction(context, tx),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+              IconButton(
+                icon: const Icon(Icons.exit_to_app),
+                onPressed: () => FirebaseAuth.instance.signOut(),
               ),
             ],
-          );
-        },
+          ),
+
+          body: pages[_selectedPageIndex],
+
+          
+          floatingActionButton: FloatingActionButton(
+            onPressed: () => _startAddNewTransaction(context),
+            child: const Icon(Icons.add),
+          ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+          
+          bottomNavigationBar: BottomAppBar(
+            shape: const CircularNotchedRectangle(),
+            notchMargin: 8.0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround, // Distribuisce meglio le icone
+              children: [
+                IconButton(
+                  icon: Icon(Icons.account_balance_wallet, 
+                    color: _selectedPageIndex == 0 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(0),
+                ),
+                IconButton(
+                  icon: Icon(Icons.list, 
+                    color: _selectedPageIndex == 1 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(1),
+                ),
+                const SizedBox(width: 40), // Lo spazio per non coprire la scritta "Lista"
+                IconButton(
+                  icon: Icon(Icons.bar_chart, 
+                    color: _selectedPageIndex == 2 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(2),
+                ),
+                // Ho aggiunto un'icona "Profilo" o "Finta" per bilanciare i 4 angoli
+                IconButton(
+                  icon: const Icon(Icons.person, color: Colors.grey),
+                  onPressed: () {}, 
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTransactionItem(BuildContext context, Transaction tx, bool isDarkMode) {
+    return Dismissible(
+      key: ValueKey(tx.id),
+      background: Container(
+        color: Theme.of(context).colorScheme.error,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        child: const Icon(Icons.delete, color: Colors.white, size: 40),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _startAddNewTransaction(context),
-        child: const Icon(Icons.add),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (direction) => showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Sei sicuro?'),
+          content: const Text('Vuoi eliminare questa spesa definitivamente?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('No')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Sì, elimina')),
+          ],
+        ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      onDismissed: (_) => _deleteTransaction(tx.id),
+      child: Card(
+        elevation: isDarkMode ? 2 : 4,
+        color: isDarkMode ? Colors.grey.shade900 : null,
+        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: isDarkMode ? const BorderSide(color: Colors.amber, width: 1) : BorderSide.none,
+        ),
+        child: ListTile(
+          leading: CircleAvatar(
+            radius: 30,
+            // Cambiamo il colore del cerchio: verde se entrata, il colore primario se spesa
+            backgroundColor: tx.isIncome 
+                ? Colors.green.withOpacity(0.8) 
+                : Theme.of(context).colorScheme.primary,
+            foregroundColor: Colors.white,
+            child: Icon(
+              _categoryIcons[tx.category] ?? Icons.category, 
+              size: 30
+            ),
+          ),
+          title: Text(
+            tx.title, 
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+          ),
+          subtitle: Text(
+            "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}"
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${tx.isIncome ? "+" : "-"} €${tx.amount.toStringAsFixed(2)}', 
+                style: TextStyle(
+                  fontWeight: FontWeight.bold, 
+                  fontSize: 16,
+                  // VERDE per entrate, ROSSO per spese
+                  color: tx.isIncome ? Colors.green : Colors.redAccent,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit, color: Colors.blue),
+                onPressed: () => _startEditTransaction(context, tx),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
