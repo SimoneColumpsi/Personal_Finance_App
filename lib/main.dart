@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -268,24 +270,28 @@ class _HomePageState extends State<HomePage> {
         }
 
         // --- DEFINIZIONE PAGINE ---
+        final List<String> titles = [
+          'ANALISI SALDO',
+          'LE MIE SPESE',
+          'STATISTICHE',
+          'IMPOSTAZIONI',
+        ];
+
         final List<Widget> pages = [
           BalanceScreen(loadedTransactions), // Indice 0
           ListView.builder(
             itemCount: loadedTransactions.length,
             itemBuilder: (ctx, index) => _buildTransactionItem(context, loadedTransactions[index], isDarkMode),
-          ),
-          AnalyticsScreen(loadedTransactions), // 2: Grafici
-          const SettingsScreen(),
-          ];
+          ), // Indice 1
+          AnalyticsScreen(loadedTransactions), // Indice 2
+          const SettingsScreen(), // Indice 3
+        ];
 
         return Scaffold(
           appBar: AppBar(
+            // Molto più semplice: pesca il titolo dalla lista in base all'indice
             title: Text(
-              _selectedPageIndex == 0 
-                  ? 'ANALISI SALDO' 
-                  : _selectedPageIndex == 1 
-                      ? 'LE MIE SPESE' 
-                      : 'STATISTICHE',
+              titles[_selectedPageIndex],
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             actions: [
