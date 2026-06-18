@@ -6,6 +6,7 @@ class Transaction {
   final DateTime date;
   final String category;
   final bool isIncome;
+  final String paymentMethod;
 
   Transaction({
     required this.id,
@@ -14,5 +15,6 @@ class Transaction {
     required this.date,
     required this.category,
     this.isIncome = false,
+    required this.paymentMethod,
   });
 }

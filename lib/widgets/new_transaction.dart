@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class NewTransaction extends StatefulWidget {
-  final Function(String, double, DateTime, String, bool) addTx;
+  // CORRETTO: La funzione ora accetta anche il sesto parametro String per il metodo di pagamento
+  final Function(String, double, DateTime, String, bool, String) addTx;
 
-  // --- NUOVI PARAMETRI OPZIONALI PER LA MODIFICA ---
   final String? existingTitle;
   final double? existingAmount;
   final DateTime? existingDate;
   final String? existingCategory;
   final bool existingIsIncome;
+  final String? existingPaymentMethod;
 
   const NewTransaction(
     this.addTx, {
@@ -19,6 +20,7 @@ class NewTransaction extends StatefulWidget {
     this.existingCategory,
     super.key,
     this.existingIsIncome = false,
+    this.existingPaymentMethod,
   });
 
   @override
@@ -31,27 +33,26 @@ class _NewTransactionState extends State<NewTransaction> {
   DateTime? _selectedDate;
   String _selectedCategory = 'Altro';
   bool _isIncome = false; 
+  String _paymentMethod = 'Contanti'; // <--- AGGIUNTA VARIABILE DI STATO MANCANTE
 
-final List<String> _expenseCategories = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
-final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
+  final List<String> _expenseCategories = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
+  final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
 
   @override
   void initState() {
     super.initState();
-    // Se ci sono dati esistenti (MODIFICA), riempiamo i campi!
     if (widget.existingTitle != null) {
       _titleController = TextEditingController(text: widget.existingTitle);
-      _amountController = TextEditingController(
-        text: widget.existingAmount.toString(),
-      );
+      _amountController = TextEditingController(text: widget.existingAmount.toString());
       _selectedDate = widget.existingDate;
       _selectedCategory = widget.existingCategory ?? 'Altro';
-      _isIncome = widget.existingIsIncome ?? false;
+      _isIncome = widget.existingIsIncome;
+      _paymentMethod = widget.existingPaymentMethod ?? 'Contanti'; // Ora è definita sopra!
     } else {
-      // Se non ci sono dati (NUOVA SPESA), partiamo vuoti
       _titleController = TextEditingController();
       _amountController = TextEditingController();
       _isIncome = false;
+      _paymentMethod = 'Contanti'; // Default per nuove transazioni
     }
   }
 
@@ -68,7 +69,6 @@ final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus
     }
 
     final enteredTitle = _titleController.text;
-    // Gestione virgola/punto
     final enteredAmount = double.parse(
       _amountController.text.replaceAll(',', '.'),
     );
@@ -77,12 +77,14 @@ final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus
       return;
     }
 
+    // CORRETTO: Passiamo il sesto parametro alla funzione del main.dart
     widget.addTx(
       enteredTitle,
       enteredAmount,
       _selectedDate!,
       _selectedCategory,
       _isIncome,
+      _paymentMethod,
     );
 
     Navigator.of(context).pop();
@@ -91,8 +93,7 @@ final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus
   void _presentDatePicker() {
     showDatePicker(
       context: context,
-      initialDate:
-          _selectedDate ?? DateTime.now(), // Parte dalla data salvata o da oggi
+      initialDate: _selectedDate ?? DateTime.now(), 
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
       locale: const Locale("it", "IT"),
@@ -152,12 +153,28 @@ final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus
                 DropdownButton<String>(
                   value: _selectedCategory,
                   onChanged: (val) => setState(() => _selectedCategory = val!),
-                  // CAMBIO DINAMICO DELLE CATEGORIE
                   items: (_isIncome ? _incomeCategories : _expenseCategories)
                       .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
                       .toList(),
                 ),
               ],
+            ),
+            const Divider(height: 20),
+
+            // 4. NUOVO SELETTORE GRAFICO PER IL METODO DI PAGAMENTO
+            const Text("Metodo di pagamento:", style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'Contanti', label: Text('Contanti'), icon: Icon(Icons.money)),
+                ButtonSegment(value: 'Carta', label: Text('Carta'), icon: Icon(Icons.credit_card)),
+              ],
+              selected: {_paymentMethod},
+              onSelectionChanged: (Set<String> newSelection) {
+                setState(() {
+                  _paymentMethod = newSelection.first;
+                });
+              },
             ),
 
             const SizedBox(height: 20),
@@ -171,7 +188,6 @@ final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus
     );
   }
 
-  // Helper per i pulsanti di scelta tipo
   Widget _buildTypeButton(String label, bool isIncomeType, Color color) {
     bool isSelected = _isIncome == isIncomeType;
     return ElevatedButton(
@@ -182,7 +198,6 @@ final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus
       onPressed: () {
         setState(() {
           _isIncome = isIncomeType;
-          // Reset della categoria quando si cambia tipo per evitare errori
           _selectedCategory = isIncomeType ? _incomeCategories[0] : _expenseCategories[0];
         });
       },

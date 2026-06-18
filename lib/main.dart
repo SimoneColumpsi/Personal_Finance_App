@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
 
 import './models/transaction.dart';
 import './widgets/new_transaction.dart';
@@ -15,15 +16,19 @@ import './services/notification_service.dart';
 import './screens/balance_screen.dart'; 
 import './screens/analytics_screen.dart';
 import './screens/settings_screen.dart';
+import './providers/language_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   await NotificationService.init();
 
-  initializeDateFormatting('it_IT', null).then((_) {
-    runApp(const PersonalFinanceApp());
-  });
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => LanguageProvider(),
+      child: const PersonalFinanceApp(),
+    ),
+  );
 }
 
 class PersonalFinanceApp extends StatefulWidget {
@@ -46,6 +51,7 @@ class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Le Mie Spese',
+      debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -131,7 +137,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedChartPeriod = 0;
-  int _selectedPageIndex = 1; // 1 = Home (Lista), 0 = Saldo
+  int _selectedPageIndex = 1; 
 
   void _selectPage(int index) {
     setState(() {
@@ -145,15 +151,13 @@ class _HomePageState extends State<HomePage> {
     'Svago': Icons.movie,
     'Casa': Icons.home,
     'Altro': Icons.category,
-
-
-    'Stipendio': Icons.payments,        // Icona banconote
-    'Regalo': Icons.card_giftcard,     // Icona pacco regalo
-    'Vendita': Icons.sell,             // Icona cartellino prezzo
+    'Stipendio': Icons.payments,        
+    'Regalo': Icons.card_giftcard,     
+    'Vendita': Icons.sell,             
     'Bonus': Icons.redeem,
   };
 
-  void _addNewTransaction(String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome) {
+  void _addNewTransaction(String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome, String paymentMethod) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     FirebaseFirestore.instance.collection('expenses').add({
@@ -163,15 +167,18 @@ class _HomePageState extends State<HomePage> {
       'category': txCategory,
       'isIncome': isIncome,
       'userId': user.uid,
+      'paymentMethod': paymentMethod,
     });
   }
 
-  void _editTransactionFirebase(String id, String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome) {
+  void _editTransactionFirebase(String id, String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome, String paymentMethod) {
     FirebaseFirestore.instance.collection('expenses').doc(id).update({
       'title': txTitle,
       'amount': txAmount,
       'date': chosenDate,
       'category': txCategory,
+      'isIncome': isIncome,
+      'paymentMethod': paymentMethod,
     });
   }
 
@@ -197,12 +204,14 @@ class _HomePageState extends State<HomePage> {
       builder: (_) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: NewTransaction(
-          (title, amount, date, category, isIncome) => _editTransactionFirebase(tx.id, title, amount, date, category, isIncome),
+          (title, amount, date, category, isIncome, method) => 
+              _editTransactionFirebase(tx.id, title, amount, date, category, isIncome, method),
           existingTitle: tx.title,
           existingAmount: tx.amount,
           existingDate: tx.date,
           existingCategory: tx.category,
           existingIsIncome: tx.isIncome,
+          existingPaymentMethod: tx.paymentMethod, // Lo passeremo a NewTransaction
         ),
       ),
     );
@@ -228,6 +237,8 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final user = FirebaseAuth.instance.currentUser;
+    final langProvider = Provider.of<LanguageProvider>(context);
+    final texts = langProvider.texts;
 
     return StreamBuilder(
       stream: FirebaseFirestore.instance
@@ -243,6 +254,7 @@ class _HomePageState extends State<HomePage> {
         final docs = snapshot.data?.docs ?? [];
         final loadedTransactions = docs.map((doc) {
           final data = doc.data();
+          final method = data.containsKey('paymentMethod') ? data['paymentMethod'] : 'Contanti';
           return Transaction(
             id: doc.id,
             title: data['title'],
@@ -250,46 +262,31 @@ class _HomePageState extends State<HomePage> {
             date: (data['date'] as Timestamp).toDate(),
             category: data['category'] ?? 'Altro',
             isIncome: data['isIncome'] ?? false,
+            paymentMethod: method,
           );
         }).toList();
 
         loadedTransactions.sort((a, b) => b.date.compareTo(a.date));
 
-        // Logica filtri per grafici
-        final now = DateTime.now();
-        List<Transaction> recentForChart = [];
-        if (_selectedChartPeriod == 0) {
-          final monday = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
-          recentForChart = loadedTransactions.where((tx) => tx.date.isAfter(monday) || tx.date.isAtSameMomentAs(monday)).toList();
-        } else if (_selectedChartPeriod == 1) {
-          final firstDay = DateTime(now.year, now.month, 1);
-          recentForChart = loadedTransactions.where((tx) => tx.date.isAfter(firstDay) || tx.date.isAtSameMomentAs(firstDay)).toList();
-        } else {
-          final firstYear = DateTime(now.year, 1, 1);
-          recentForChart = loadedTransactions.where((tx) => tx.date.isAfter(firstYear) || tx.date.isAtSameMomentAs(firstYear)).toList();
-        }
-
-        // --- DEFINIZIONE PAGINE ---
         final List<String> titles = [
-          'ANALISI SALDO',
-          'LE MIE SPESE',
-          'STATISTICHE',
-          'IMPOSTAZIONI',
+          texts['balance_title'] ?? 'ANALISI SALDO',
+          texts['app_title'] ?? 'LE MIE SPESE',
+          texts['stats_title'] ?? 'STATISTICHE',
+          texts['settings_title'] ?? 'IMPOSTAZIONI',
         ];
 
         final List<Widget> pages = [
-          BalanceScreen(loadedTransactions), // Indice 0
+          BalanceScreen(loadedTransactions), 
           ListView.builder(
             itemCount: loadedTransactions.length,
             itemBuilder: (ctx, index) => _buildTransactionItem(context, loadedTransactions[index], isDarkMode),
-          ), // Indice 1
-          AnalyticsScreen(loadedTransactions), // Indice 2
-          const SettingsScreen(), // Indice 3
+          ), 
+          AnalyticsScreen(loadedTransactions), 
+          const SettingsScreen(), 
         ];
 
         return Scaffold(
           appBar: AppBar(
-            // Molto più semplice: pesca il titolo dalla lista in base all'indice
             title: Text(
               titles[_selectedPageIndex],
               style: const TextStyle(fontWeight: FontWeight.bold),
@@ -305,22 +302,17 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-
           body: pages[_selectedPageIndex],
-
-          
           floatingActionButton: FloatingActionButton(
             onPressed: () => _startAddNewTransaction(context),
             child: const Icon(Icons.add),
           ),
           floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-
-          
           bottomNavigationBar: BottomAppBar(
             shape: const CircularNotchedRectangle(),
             notchMargin: 8.0,
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround, // Distribuisce meglio le icone
+              mainAxisAlignment: MainAxisAlignment.spaceAround, 
               children: [
                 IconButton(
                   icon: Icon(Icons.account_balance_wallet, 
@@ -332,7 +324,7 @@ class _HomePageState extends State<HomePage> {
                     color: _selectedPageIndex == 1 ? Colors.teal : Colors.grey),
                   onPressed: () => _selectPage(1),
                 ),
-                const SizedBox(width: 40), // Lo spazio per non coprire la scritta "Lista"
+                const SizedBox(width: 40), 
                 IconButton(
                   icon: Icon(Icons.bar_chart, 
                     color: _selectedPageIndex == 2 ? Colors.teal : Colors.grey),
@@ -385,7 +377,6 @@ class _HomePageState extends State<HomePage> {
         child: ListTile(
           leading: CircleAvatar(
             radius: 30,
-            // Cambiamo il colore del cerchio: verde se entrata, il colore primario se spesa
             backgroundColor: tx.isIncome 
                 ? Colors.green.withOpacity(0.8) 
                 : Colors.redAccent.withOpacity(0.7),
@@ -400,7 +391,7 @@ class _HomePageState extends State<HomePage> {
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
           ),
           subtitle: Text(
-            "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}"
+            "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}\n[${tx.paymentMethod}]"
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
@@ -410,7 +401,6 @@ class _HomePageState extends State<HomePage> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold, 
                   fontSize: 16,
-                  // VERDE per entrate, ROSSO per spese
                   color: tx.isIncome ? Colors.green : Colors.redAccent,
                 ),
               ),
