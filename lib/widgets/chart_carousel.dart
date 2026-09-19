@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import './category_chart.dart';
-import './chart.dart'; 
-import './line_chart_widget.dart'; // <--- IMPORTANTE: Aggiungi questo import
+import './month_calendar_widget.dart';
+import './year_grid_widget.dart';
+import './week_grid_widget.dart';
 
 class ChartCarousel extends StatefulWidget {
   final List<Transaction> recentTransactions;
   final int selectedPeriodIndex;
+  final DateTime referenceDate;
 
   const ChartCarousel({
     super.key,
     required this.recentTransactions,
     required this.selectedPeriodIndex,
+    required this.referenceDate,
   });
 
   @override
@@ -22,7 +25,6 @@ class _ChartCarouselState extends State<ChartCarousel> {
   final PageController _pageController = PageController();
   int _currentPageIndex = 0;
 
-  // Questo serve per resettare la pagina a 0 quando cambi il filtro (Settimana/Mese/Anno)
   @override
   void didUpdateWidget(covariant ChartCarousel oldWidget) {
     if (oldWidget.selectedPeriodIndex != widget.selectedPeriodIndex) {
@@ -34,32 +36,58 @@ class _ChartCarouselState extends State<ChartCarousel> {
     super.didUpdateWidget(oldWidget);
   }
 
+  Widget _buildPeriodChart() {
+    if (widget.selectedPeriodIndex == 0) {
+      return WeekGridWidget(
+        transactions: widget.recentTransactions,
+        referenceDate: widget.referenceDate,
+      );
+    } else if (widget.selectedPeriodIndex == 1) {
+      return MonthCalendarWidget(
+        transactions: widget.recentTransactions,
+        referenceDate: widget.referenceDate,
+      );
+    } else {
+      return YearGridWidget(
+        transactions: widget.recentTransactions,
+        referenceDate: widget.referenceDate,
+      );
+    }
+  }
+
+  double _getCarouselHeight() {
+    if (widget.selectedPeriodIndex == 0) {
+      // Per la settimana: 160 per la tabella, 235 quando fai swipe sulla torta
+      return _currentPageIndex == 0 ? 160.0 : 235.0;
+    } else if (widget.selectedPeriodIndex == 1) {
+      return 365.0; // Mese
+    } else {
+      return 340.0; // Anno
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SizedBox(
-          height: 220, // Altezza fissa per permettere lo scorrimento
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          height: _getCarouselHeight(),
           child: PageView(
             controller: _pageController,
-            physics: const BouncingScrollPhysics(), // Rende lo scorrimento più fluido
+            physics: const BouncingScrollPhysics(),
             onPageChanged: (index) {
               setState(() {
                 _currentPageIndex = index;
               });
             },
             children: [
-              // PAGINA 1: Grafico Temporale
-              widget.selectedPeriodIndex == 2
-                  ? LineChartWidget(transactions: widget.recentTransactions) // LINEA per Anno
-                  : Chart(widget.recentTransactions, widget.selectedPeriodIndex), // BARRE per gli altri
-              
-              // PAGINA 2: Grafico a Torta
+              _buildPeriodChart(),
               CategoryChart(widget.recentTransactions),
             ],
           ),
         ),
-        // Indicatori (i pallini sotto il grafico)
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -74,7 +102,7 @@ class _ChartCarouselState extends State<ChartCarousel> {
   Widget _buildDot(int index) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
-      margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+      margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
       height: 8,
       width: _currentPageIndex == index ? 18 : 8,
       decoration: BoxDecoration(
