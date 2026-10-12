@@ -1,0 +1,3286 @@
+=== FILE: lib\main.dart ===
+
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
+
+import './models/transaction.dart';
+import './widgets/new_transaction.dart';
+import './widgets/chart_carousel.dart'; 
+import './screens/login_screen.dart';
+import './services/notification_service.dart';
+import './screens/balance_screen.dart'; 
+import './screens/analytics_screen.dart';
+import './screens/settings_screen.dart';
+import './providers/language_provider.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  // await NotificationService.init();
+
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => LanguageProvider(),
+      child: const PersonalFinanceApp(),
+    ),
+  );
+}
+
+class PersonalFinanceApp extends StatefulWidget {
+  const PersonalFinanceApp({super.key});
+
+  @override
+  State<PersonalFinanceApp> createState() => _PersonalFinanceAppState();
+}
+
+class _PersonalFinanceAppState extends State<PersonalFinanceApp> {
+  ThemeMode _themeMode = ThemeMode.light;
+
+  void _toggleTheme() {
+    setState(() {
+      _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Le Mie Spese',
+      debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('it', 'IT')],
+      themeMode: _themeMode,
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.light,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          secondary: Colors.amber,
+          brightness: Brightness.light,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.teal,
+          foregroundColor: Colors.white,
+          centerTitle: true,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.teal,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Colors.black,
+        colorScheme: ColorScheme.dark(
+          primary: Colors.amber,
+          secondary: Colors.amberAccent,
+          surface: Colors.grey.shade900,
+          onPrimary: Colors.black,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.amber,
+          centerTitle: true,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.amber,
+            foregroundColor: Colors.black,
+            textStyle: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: Colors.amber,
+          foregroundColor: Colors.black,
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: Colors.amber),
+        ),
+      ),
+      home: StreamBuilder(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (ctx, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          if (snapshot.hasData) {
+            return HomePage(changeTheme: _toggleTheme);
+          }
+          return const LoginScreen();
+        },
+      ),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  final VoidCallback changeTheme;
+  const HomePage({super.key, required this.changeTheme});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int _selectedChartPeriod = 0;
+  int _selectedPageIndex = 1; 
+
+  void _selectPage(int index) {
+    setState(() {
+      _selectedPageIndex = index;
+    });
+  }
+
+  final Map<String, IconData> _categoryIcons = {
+    'Cibo': Icons.fastfood,
+    'Trasporti': Icons.directions_car,
+    'Svago': Icons.movie,
+    'Casa': Icons.home,
+    'Altro': Icons.category,
+    'Stipendio': Icons.payments,        
+    'Regalo': Icons.card_giftcard,     
+    'Vendita': Icons.sell,             
+    'Bonus': Icons.redeem,
+  };
+
+  void _addNewTransaction(String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome, String paymentMethod) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    FirebaseFirestore.instance.collection('expenses').add({
+      'title': txTitle,
+      'amount': txAmount,
+      'date': chosenDate,
+      'category': txCategory,
+      'isIncome': isIncome,
+      'userId': user.uid,
+      'paymentMethod': paymentMethod,
+    });
+  }
+
+  void _editTransactionFirebase(String id, String txTitle, double txAmount, DateTime chosenDate, String txCategory, bool isIncome, String paymentMethod) {
+    FirebaseFirestore.instance.collection('expenses').doc(id).update({
+      'title': txTitle,
+      'amount': txAmount,
+      'date': chosenDate,
+      'category': txCategory,
+      'isIncome': isIncome,
+      'paymentMethod': paymentMethod,
+    });
+  }
+
+  void _deleteTransaction(String id) {
+    FirebaseFirestore.instance.collection('expenses').doc(id).delete();
+  }
+
+  void _startAddNewTransaction(BuildContext ctx) {
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: NewTransaction(_addNewTransaction),
+      ),
+    );
+  }
+
+  void _startEditTransaction(BuildContext ctx, Transaction tx) {
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: NewTransaction(
+          (title, amount, date, category, isIncome, method) => 
+              _editTransactionFirebase(tx.id, title, amount, date, category, isIncome, method),
+          existingTitle: tx.title,
+          existingAmount: tx.amount,
+          existingDate: tx.date,
+          existingCategory: tx.category,
+          existingIsIncome: tx.isIncome,
+          existingPaymentMethod: tx.paymentMethod,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final user = FirebaseAuth.instance.currentUser;
+    final langProvider = Provider.of<LanguageProvider>(context);
+    final texts = langProvider.texts;
+
+    return StreamBuilder(
+      stream: FirebaseFirestore.instance
+          .collection('expenses')
+          .where('userId', isEqualTo: user?.uid)
+          .orderBy('date', descending: true)
+          .snapshots(),
+      builder: (ctx, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        final loadedTransactions = docs.map((doc) {
+          final data = doc.data();
+          final method = data.containsKey('paymentMethod') ? data['paymentMethod'] : 'Contanti';
+          return Transaction(
+            id: doc.id,
+            title: data['title'],
+            amount: (data['amount'] as num).toDouble(),
+            date: (data['date'] as Timestamp).toDate(),
+            category: data['category'] ?? 'Altro',
+            isIncome: data['isIncome'] ?? false,
+            paymentMethod: method,
+          );
+        }).toList();
+
+        loadedTransactions.sort((a, b) => b.date.compareTo(a.date));
+
+        final List<String> titles = [
+          texts['balance_title'] ?? 'ANALISI SALDO',
+          texts['app_title'] ?? 'LE MIE SPESE',
+          texts['stats_title'] ?? 'STATISTICHE',
+          texts['settings_title'] ?? 'IMPOSTAZIONI',
+        ];
+
+        final List<Widget> pages = [
+          BalanceScreen(loadedTransactions), 
+          
+          // Schermata Lista Spese con Ricerca Combinata e Filtro Categoria
+          _ExpenseListScreen(
+            loadedTransactions, 
+            _categoryIcons, 
+            _deleteTransaction, 
+            _startEditTransaction, 
+            isDarkMode,
+          ), 
+
+          AnalyticsScreen(loadedTransactions), 
+          const SettingsScreen(), 
+        ];
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              titles[_selectedPageIndex],
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            actions: [
+              IconButton(
+                onPressed: widget.changeTheme,
+                icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
+              ),
+              IconButton(
+                icon: const Icon(Icons.exit_to_app),
+                onPressed: () => FirebaseAuth.instance.signOut(),
+              ),
+            ],
+          ),
+          body: pages[_selectedPageIndex],
+          floatingActionButton: FloatingActionButton(
+            onPressed: () => _startAddNewTransaction(context),
+            child: const Icon(Icons.add),
+          ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+          bottomNavigationBar: BottomAppBar(
+            shape: const CircularNotchedRectangle(),
+            notchMargin: 8.0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround, 
+              children: [
+                IconButton(
+                  icon: Icon(Icons.account_balance_wallet, 
+                    color: _selectedPageIndex == 0 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(0),
+                ),
+                IconButton(
+                  icon: Icon(Icons.list, 
+                    color: _selectedPageIndex == 1 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(1),
+                ),
+                const SizedBox(width: 40), 
+                IconButton(
+                  icon: Icon(Icons.bar_chart, 
+                    color: _selectedPageIndex == 2 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(2),
+                ),
+                IconButton(
+                  icon: Icon(Icons.settings, 
+                    color: _selectedPageIndex == 3 ? Colors.teal : Colors.grey),
+                  onPressed: () => _selectPage(3),
+                ), 
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// Widget isolato per gestire ricerca (titolo/categoria) e filtri multipli in modo fluido
+class _ExpenseListScreen extends StatefulWidget {
+  final List<Transaction> transactions;
+  final Map<String, IconData> categoryIcons;
+  final Function(String) onDelete;
+  final Function(BuildContext, Transaction) onEdit;
+  final bool isDarkMode;
+
+  const _ExpenseListScreen(
+    this.transactions,
+    this.categoryIcons,
+    this.onDelete,
+    this.onEdit,
+    this.isDarkMode,
+  );
+
+  @override
+  State<_ExpenseListScreen> createState() => _ExpenseListScreenState();
+}
+
+class _ExpenseListScreenState extends State<_ExpenseListScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool? _filterIsIncome;
+  String? _filterCategory;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Estrae le categorie disponibili in base al filtro tipo corrente
+    final availableCategories = widget.transactions
+        .where((tx) => _filterIsIncome == null || tx.isIncome == _filterIsIncome)
+        .map((tx) => tx.category)
+        .toSet()
+        .toList();
+
+    if (_filterCategory != null && !availableCategories.contains(_filterCategory)) {
+      _filterCategory = null;
+    }
+
+    final filteredTransactions = widget.transactions.where((tx) {
+      final query = _searchQuery.toLowerCase();
+      final matchesQuery = tx.title.toLowerCase().contains(query) ||
+          tx.category.toLowerCase().contains(query);
+      
+      final matchesType = _filterIsIncome == null || tx.isIncome == _filterIsIncome;
+      final matchesCategory = _filterCategory == null || tx.category == _filterCategory;
+
+      return matchesQuery && matchesType && matchesCategory;
+    }).toList();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Column(
+            children: [
+              TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  labelText: 'Cerca per titolo o categoria...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                ),
+                onChanged: (val) {
+                  setState(() => _searchQuery = val);
+                },
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  // Filtro Tipo
+                  Expanded(
+                    child: DropdownButtonFormField<bool?>(
+                      value: _filterIsIncome,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        labelText: 'Tipo',
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: null, child: Text('Tutti')),
+                        DropdownMenuItem(value: false, child: Text('Spese')),
+                        DropdownMenuItem(value: true, child: Text('Entrate')),
+                      ],
+                      onChanged: (val) {
+                        setState(() {
+                          _filterIsIncome = val;
+                          _filterCategory = null;
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Filtro Categoria Dinamico
+                  Expanded(
+                    child: DropdownButtonFormField<String?>(
+                      value: _filterCategory,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        labelText: 'Categoria',
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('Tutte')),
+                        ...availableCategories.map((cat) => DropdownMenuItem(
+                              value: cat,
+                              child: Text(cat, overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
+                      onChanged: (val) => setState(() => _filterCategory = val),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  if (_searchQuery.isNotEmpty || _filterIsIncome != null || _filterCategory != null)
+                    IconButton(
+                      icon: const Icon(Icons.clear_all),
+                      tooltip: 'Resetta filtri',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                          _filterIsIncome = null;
+                          _filterCategory = null;
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const Divider(),
+        Expanded(
+          child: filteredTransactions.isEmpty
+              ? const Center(child: Text("Nessuna transazione trovata."))
+              : ListView.builder(
+                  itemCount: filteredTransactions.length,
+                  itemBuilder: (ctx, index) {
+                    return _buildItem(context, filteredTransactions[index]);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildItem(BuildContext context, Transaction tx) {
+    return Dismissible(
+      key: ValueKey(tx.id),
+      background: Container(
+        color: Theme.of(context).colorScheme.error,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        child: const Icon(Icons.delete, color: Colors.white, size: 40),
+      ),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (direction) => showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Sei sicuro?'),
+          content: const Text('Vuoi eliminare questa spesa definitivamente?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('No')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Sì, elimina')),
+          ],
+        ),
+      ),
+      onDismissed: (_) => widget.onDelete(tx.id),
+      child: Card(
+        elevation: widget.isDarkMode ? 2 : 4,
+        color: widget.isDarkMode ? Colors.grey.shade900 : null,
+        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: widget.isDarkMode ? const BorderSide(color: Colors.amber, width: 1) : BorderSide.none,
+        ),
+        child: ListTile(
+          leading: CircleAvatar(
+            radius: 30,
+            backgroundColor: tx.isIncome 
+                ? Colors.green.withOpacity(0.8) 
+                : Colors.redAccent.withOpacity(0.7),
+            foregroundColor: Colors.white,
+            child: Icon(
+              widget.categoryIcons[tx.category] ?? Icons.category, 
+              size: 30
+            ),
+          ),
+          title: Text(
+            tx.title, 
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+          ),
+          subtitle: Text(
+            "${tx.category} • ${tx.date.day}/${tx.date.month}/${tx.date.year}\n[${tx.paymentMethod}]"
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${tx.isIncome ? "+" : "-"} €${tx.amount.toStringAsFixed(2)}', 
+                style: TextStyle(
+                  fontWeight: FontWeight.bold, 
+                  fontSize: 16,
+                  color: tx.isIncome ? Colors.green : Colors.redAccent,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit, color: Colors.blue),
+                onPressed: () => widget.onEdit(context, tx),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\models\transaction.dart ===
+
+// --- MODELLO DATI ---
+class Transaction {
+  final String id;
+  final String title;
+  final double amount;
+  final DateTime date;
+  final String category;
+  final bool isIncome;
+  final String paymentMethod;
+
+  Transaction({
+    required this.id,
+    required this.title,
+    required this.amount,
+    required this.date,
+    required this.category,
+    this.isIncome = false,
+    required this.paymentMethod,
+  });
+}
+
+
+========================================
+
+=== FILE: lib\providers\language_provider.dart ===
+
+import 'package:flutter/material.dart';
+
+class LanguageProvider with ChangeNotifier {
+  bool _isItalian = true;
+
+  bool get isItalian => _isItalian;
+
+  Map<String, String> get texts {
+    if (_isItalian) {
+      return {
+        'app_title': 'LE MIE SPESE',
+        'balance_title': 'ANALISI SALDO',
+        'stats_title': 'STATISTICHE',
+        'settings_title': 'IMPOSTAZIONI',
+      };
+    } else {
+      return {
+        'app_title': 'MY EXPENSES',
+        'balance_title': 'BALANCE ANALYSIS',
+        'stats_title': 'STATISTICS',
+        'settings_title': 'SETTINGS',
+      };
+    }
+  }
+
+  void toggleLanguage(bool value) {
+    _isItalian = value;
+    notifyListeners();
+  }
+}
+
+========================================
+
+=== FILE: lib\screens\analytics_screen.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../models/transaction.dart';
+import '../widgets/chart_carousel.dart';
+
+class AnalyticsScreen extends StatefulWidget {
+  final List<Transaction> transactions;
+
+  const AnalyticsScreen(this.transactions, {super.key});
+
+  @override
+  State<AnalyticsScreen> createState() => _AnalyticsScreenState();
+}
+
+class _AnalyticsScreenState extends State<AnalyticsScreen> {
+  int _selectedPeriod = 0; // 0=Settimana, 1=Mese, 2=Anno
+  int _periodOffset = 0;   // 0 = periodo corrente, -1 = precedente, ecc.
+
+  // Calcola intervallo (inizio e fine) in base al tipo di periodo e all'offset
+  DateTimeRange _calculateDateRange() {
+    final now = DateTime.now();
+
+    if (_selectedPeriod == 0) {
+      // SETTIMANA (da Lunedì a Domenica)
+      final currentMonday = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+      final start = currentMonday.add(Duration(days: _periodOffset * 7));
+      final end = start.add(const Duration(days: 6, hours: 23, minutes: 59, seconds: 59));
+      return DateTimeRange(start: start, end: end);
+    } else if (_selectedPeriod == 1) {
+      // MESE
+      final targetDate = DateTime(now.year, now.month + _periodOffset, 1);
+      final start = DateTime(targetDate.year, targetDate.month, 1);
+      final lastDay = DateTime(targetDate.year, targetDate.month + 1, 0);
+      final end = DateTime(lastDay.year, lastDay.month, lastDay.day, 23, 59, 59);
+      return DateTimeRange(start: start, end: end);
+    } else {
+      // ANNO
+      final year = now.year + _periodOffset;
+      final start = DateTime(year, 1, 1);
+      final end = DateTime(year, 12, 31, 23, 59, 59);
+      return DateTimeRange(start: start, end: end);
+    }
+  }
+
+  // Etichetta testuale dinamica per il navigatore
+  String _getPeriodLabel(DateTimeRange range) {
+    if (_selectedPeriod == 0) {
+      final formatter = DateFormat('d MMM', 'it_IT');
+      return "${formatter.format(range.start)} - ${formatter.format(range.end)}";
+    } else if (_selectedPeriod == 1) {
+      return DateFormat('MMMM yyyy', 'it_IT').format(range.start).toUpperCase();
+    } else {
+      return "${range.start.year}";
+    }
+  }
+
+  double _calculateTotalInRange(List<Transaction> txs, DateTime start, DateTime end) {
+    return txs
+        .where((tx) =>
+            !tx.isIncome &&
+            (tx.date.isAfter(start) || tx.date.isAtSameMomentAs(start)) &&
+            (tx.date.isBefore(end) || tx.date.isAtSameMomentAs(end)))
+        .fold(0.0, (sum, tx) => sum + tx.amount);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final range = _calculateDateRange();
+
+    // Filtro per il grafico basato sul range selezionato
+    final filteredForChart = widget.transactions.where((tx) {
+      return !tx.isIncome &&
+          (tx.date.isAfter(range.start) || tx.date.isAtSameMomentAs(range.start)) &&
+          (tx.date.isBefore(range.end) || tx.date.isAtSameMomentAs(range.end));
+    }).toList();
+
+    // Totale del periodo attualmente navigato
+    final currentPeriodTotal = _calculateTotalInRange(widget.transactions, range.start, range.end);
+
+    return Scaffold(
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            const SizedBox(height: 15),
+
+            // 1. Tasti filtro (Settimana / Mese / Anno)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildFilterButton('Settimana', 0),
+                _buildFilterButton('Mese', 1),
+                _buildFilterButton('Anno', 2),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            // 2. Barra di navigazione temporale (< Periodo >)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left, size: 28),
+                    onPressed: () => setState(() => _periodOffset--),
+                  ),
+                  Text(
+                    _getPeriodLabel(range),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right, size: 28),
+                    // Blocca lo scorrimento verso il futuro se sei già nel periodo corrente
+                    onPressed: _periodOffset < 0
+                        ? () => setState(() => _periodOffset++)
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // 3. Carosello Grafici con le sole spese dell'intervallo scelto
+            ChartCarousel(
+              recentTransactions: filteredForChart,
+              selectedPeriodIndex: _selectedPeriod,
+              referenceDate: range.start,
+            ),
+
+            const SizedBox(height: 25),
+
+            // 4. Card con il totale del periodo selezionato
+            _buildTotalCard(
+              "SPESA DEL PERIODO SELEZIONATO",
+              currentPeriodTotal,
+              const Color(0xFF00796B),
+            ),
+
+            const SizedBox(height: 100),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterButton(String label, int period) {
+    final isSelected = _selectedPeriod == period;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+      child: ElevatedButton(
+        onPressed: () {
+          setState(() {
+            _selectedPeriod = period;
+            _periodOffset = 0; // Reset al periodo corrente quando si cambia modalità
+          });
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isSelected ? const Color(0xFF009688) : Colors.grey[300],
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.black,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTotalCard(String title, double amount, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Card(
+        color: color,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '€${amount.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\screens\balance_screen.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
+import '../models/transaction.dart';
+
+class BalanceScreen extends StatelessWidget {
+  final List<Transaction> allTransactions;
+
+  const BalanceScreen(this.allTransactions, {super.key});
+
+  Future<void> _addAccount(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nuovo Contenitore'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Nome Conto (es. Revolut, Risparmi)'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annulla')),
+          ElevatedButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('accounts')
+                    .add({'name': name, 'createdAt': Timestamp.now()});
+              }
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Aggiungi'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteAccount(BuildContext context, String accountId, String accountName) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Elimina "$accountName"?'),
+        content: const Text('Verrà rimosso il contenitore. Le transazioni collegate rimarranno invariate.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annulla')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Elimina', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('accounts')
+          .doc(accountId)
+          .delete();
+    }
+  }
+
+  void _showTransferDialog(BuildContext context, List<Map<String, dynamic>> accounts) {
+    if (accounts.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Crea almeno due contenitori per effettuare un trasferimento.')),
+      );
+      return;
+    }
+
+    String? fromId = accounts[0]['id'];
+    String? toId = accounts[1]['id'];
+    final amountController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Giroconto / Spostamento', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Sposta denaro tra i tuoi contenitori senza creare spese o entrate.'),
+                  const SizedBox(height: 15),
+                  DropdownButtonFormField<String>(
+                    value: fromId,
+                    decoration: const InputDecoration(labelText: 'Da Contenitore'),
+                    items: accounts.map((acc) {
+                      return DropdownMenuItem<String>(
+                        value: acc['id'],
+                        child: Text(acc['name']),
+                      );
+                    }).toList(),
+                    onChanged: (val) => setDialogState(() => fromId = val),
+                  ),
+                  const SizedBox(height: 15),
+                  DropdownButtonFormField<String>(
+                    value: toId,
+                    decoration: const InputDecoration(labelText: 'A Contenitore'),
+                    items: accounts.map((acc) {
+                      return DropdownMenuItem<String>(
+                        value: acc['id'],
+                        child: Text(acc['name']),
+                      );
+                    }).toList(),
+                    onChanged: (val) => setDialogState(() => toId = val),
+                  ),
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Importo (€)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annulla')),
+              ElevatedButton(
+                onPressed: () async {
+                  final amount = double.tryParse(amountController.text.replaceAll(',', '.')) ?? 0.0;
+                  if (amount <= 0 || fromId == toId) return;
+
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user != null) {
+                    await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .collection('transfers')
+                        .add({
+                      'fromAccountId': fromId,
+                      'toAccountId': toId,
+                      'amount': amount,
+                      'date': Timestamp.now(),
+                    });
+                  }
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text('Conferma'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: user == null
+          ? const Stream.empty()
+          : FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('accounts')
+              .snapshots(),
+      builder: (context, accountSnapshot) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: user == null
+              ? const Stream.empty()
+              : FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(user.uid)
+                  .collection('transfers')
+                  .snapshots(),
+          builder: (context, transferSnapshot) {
+            // 1. Gestione box di default se l'utente è nuovo
+            List<Map<String, dynamic>> accounts = [];
+            if (accountSnapshot.hasData && accountSnapshot.data!.docs.isEmpty) {
+              // Inseriamo di default Contanti e Carta se vuoto
+              FirebaseFirestore.instance.collection('users').doc(user?.uid).collection('accounts').add({'name': 'Contanti', 'createdAt': Timestamp.now()});
+              FirebaseFirestore.instance.collection('users').doc(user?.uid).collection('accounts').add({'name': 'Carta', 'createdAt': Timestamp.now()});
+            } else if (accountSnapshot.hasData) {
+              accounts = accountSnapshot.data!.docs.map((doc) {
+                return {'id': doc.id, 'name': (doc.data() as Map<String, dynamic>)['name'] ?? 'Conto'};
+              }).toList();
+            }
+
+            // 2. Lettura trasferimenti
+            List<Map<String, dynamic>> transfers = [];
+            if (transferSnapshot.hasData) {
+              transfers = transferSnapshot.data!.docs.map((doc) {
+                final d = doc.data() as Map<String, dynamic>;
+                return {
+                  'from': d['fromAccountId'],
+                  'to': d['toAccountId'],
+                  'amount': (d['amount'] as num).toDouble(),
+                };
+              }).toList();
+            }
+
+            // 3. Calcolo saldi per ogni account
+            Map<String, double> accountBalances = {};
+            for (var acc in accounts) {
+              accountBalances[acc['id']] = 0.0;
+            }
+
+            // Calcolo transazioni (usando paymentMethod che corrisponderà al nome del box)
+            for (var tx in allTransactions) {
+              final matchingAcc = accounts.firstWhere(
+                (acc) => acc['name'].toString().toLowerCase() == tx.paymentMethod.toLowerCase(),
+                orElse: () => {},
+              );
+              if (matchingAcc.isNotEmpty) {
+                final accId = matchingAcc['id'];
+                if (tx.isIncome) {
+                  accountBalances[accId] = (accountBalances[accId] ?? 0) + tx.amount;
+                } else {
+                  accountBalances[accId] = (accountBalances[accId] ?? 0) - tx.amount;
+                }
+              }
+            }
+
+            // Calcolo trasferimenti tra box
+            for (var tr in transfers) {
+              final String fromId = tr['from'];
+              final String toId = tr['to'];
+              final double amt = tr['amount'];
+              if (accountBalances.containsKey(fromId)) {
+                accountBalances[fromId] = accountBalances[fromId]! - amt;
+              }
+              if (accountBalances.containsKey(toId)) {
+                accountBalances[toId] = accountBalances[toId]! + amt;
+              }
+            }
+
+            double saldoTotale = 0.0;
+            accountBalances.forEach((key, val) => saldoTotale += val);
+
+            return Scaffold(
+              body: SingleChildScrollView(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  children: [
+                    const Text(
+                      "SALDO COMPLESSIVO",
+                      style: TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      "€ ${saldoTotale.toStringAsFixed(2)}",
+                      style: TextStyle(
+                        fontSize: 42,
+                        fontWeight: FontWeight.bold,
+                        color: saldoTotale >= 0
+                            ? (isDarkMode ? Colors.amber : Colors.teal)
+                            : Colors.redAccent,
+                      ),
+                    ),
+                    const SizedBox(height: 25),
+
+                    // BOTTONI AZIONE RAPIDA
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () => _addAccount(context),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Nuovo Box'),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          onPressed: () => _showTransferDialog(context, accounts),
+                          icon: const Icon(Icons.swap_horiz),
+                          label: const Text('Sposta Denaro'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 25),
+
+                    // LISTA DINAMICA DEI BOX
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: accounts.length,
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: 1.3,
+                      ),
+                      itemBuilder: (ctx, i) {
+                        final acc = accounts[i];
+                        final balance = accountBalances[acc['id']] ?? 0.0;
+
+                        return Card(
+                          elevation: 3,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        acc['name'],
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (accounts.length > 1)
+                                      InkWell(
+                                        onTap: () => _deleteAccount(context, acc['id'], acc['name']),
+                                        child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                                      ),
+                                  ],
+                                ),
+                                Text(
+                                  "€ ${balance.toStringAsFixed(2)}",
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: balance >= 0 ? Colors.green : Colors.redAccent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\screens\login_screen.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  bool _isLoading = false; // Per mostrare un cerchietto mentre carica
+
+  // FUNZIONE DI LOGIN GOOGLE
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // 1. Fa partire il flusso di login (apre il popup di Google)
+      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+
+      if (googleUser == null) {
+        // L'utente ha annullato il login (tasto indietro)
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // 2. Otteniamo i dettagli di autenticazione dalla richiesta
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      // 3. Creiamo una credenziale per Firebase usando i token di Google
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // 4. Entriamo in Firebase con quella credenziale
+      await FirebaseAuth.instance.signInWithCredential(credential);
+
+      // NOTA: Non serve navigare manualmente alla Home.
+      // Il "Portiere" in main.dart noterà il login e cambierà pagina da solo.
+    } catch (e) {
+      print("Errore durante il login: $e");
+      setState(() {
+        _isLoading = false;
+      });
+
+      // Mostriamo un avviso di errore
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Errore Login: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.primary, // Sfondo colorato
+      body: Center(
+        child: Card(
+          margin: const EdgeInsets.all(20),
+          elevation: 8,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(30),
+            child: Column(
+              mainAxisSize: MainAxisSize.min, // La card è alta quanto basta
+              children: [
+                // Icona o Logo
+                const Icon(
+                  Icons.account_balance_wallet,
+                  size: 80,
+                  color: Colors.teal,
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Gestione Spese',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Accedi per salvare i tuoi dati',
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 30),
+
+                // Bottone o Caricamento
+                if (_isLoading)
+                  const CircularProgressIndicator()
+                else
+                  ElevatedButton.icon(
+                    onPressed: _signInWithGoogle,
+                    icon: const Icon(Icons.login), // Icona generica per ora
+                    label: const Text('Accedi con Google'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 30,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+========================================
+
+=== FILE: lib\screens\settings_screen.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../providers/language_provider.dart';
+import 'package:provider/provider.dart';
+
+// Lista di colori predefiniti tra cui scegliere facilmente
+final List<Color> availableCategoryColors = [
+  Colors.blue,
+  Colors.purple,
+  Colors.orange,
+  Colors.teal,
+  Colors.pink,
+  Colors.amber,
+  Colors.indigo,
+  Colors.brown,
+  Colors.deepOrange,
+  Colors.blueGrey,
+];
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  Future<void> _addCategory(BuildContext context, String type) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final controller = TextEditingController();
+    Color selectedColor = availableCategoryColors.first;
+    final isExpense = type == 'expense';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(isExpense ? 'Nuova Categoria Spesa' : 'Nuova Categoria Entrata'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(labelText: 'Nome Categoria'),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 20),
+                const Text("Scegli Colore:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: availableCategoryColors.map((color) {
+                    final isSelected = selectedColor == color;
+                    return GestureDetector(
+                      onTap: () => setDialogState(() => selectedColor = color),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSelected ? Colors.black : Colors.transparent,
+                            width: 3,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annulla')),
+              ElevatedButton(
+                onPressed: () async {
+                  final name = controller.text.trim();
+                  if (name.isNotEmpty) {
+                    await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .collection('categories')
+                        .add({
+                      'name': name,
+                      'type': type,
+                      'color': colorToHex(selectedColor),
+                      'createdAt': Timestamp.now(),
+                    });
+                  }
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text('Aggiungi'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _editCategory(BuildContext context, String catId, String currentName, String currentColorHex) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final controller = TextEditingController(text: currentName);
+    Color selectedColor = hexToColor(currentColorHex);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Modifica Categoria'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(labelText: 'Nome Categoria'),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 20),
+                const Text("Scegli Colore:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: availableCategoryColors.map((color) {
+                    final isSelected = selectedColor == color;
+                    return GestureDetector(
+                      onTap: () => setDialogState(() => selectedColor = color),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSelected ? Colors.black : Colors.transparent,
+                            width: 3,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annulla')),
+              ElevatedButton(
+                onPressed: () async {
+                  final newName = controller.text.trim();
+                  if (newName.isNotEmpty) {
+                    await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .collection('categories')
+                        .doc(catId)
+                        .update({
+                      'name': newName,
+                      'color': colorToHex(selectedColor),
+                    });
+                  }
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text('Salva'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _deleteCategory(BuildContext context, String catId, String catName) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Elimina "$catName"?'),
+        content: const Text('La categoria verrà rimossa dalle opzioni disponibili.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annulla')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Elimina', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('categories')
+          .doc(catId)
+          .delete();
+    }
+  }
+
+  // Utility per convertire Color in Hex String
+  static String colorToHex(Color color) {
+    return color.value.toRadixString(16);
+  }
+
+  // Utility per convertire Hex String in Color
+  static Color hexToColor(String hexString) {
+    try {
+      final buffer = StringBuffer(); // <-- Ecco l'inizializzazione mancante
+      if (hexString.length == 6 || hexString.length == 7) {
+        buffer.write('ff');
+      }
+      buffer.write(hexString.replaceFirst('#', ''));
+      return Color(int.parse(buffer.toString(), radix: 16));
+    } catch (_) {
+      return Colors.blue; // Colore di fallback
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final langProvider = Provider.of<LanguageProvider>(context);
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: user == null
+          ? const Stream.empty()
+          : FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('categories')
+              .snapshots(),
+      builder: (context, snapshot) {
+        final docs = snapshot.hasData ? snapshot.data!.docs : [];
+        List<Map<String, dynamic>> expenseCats = [];
+        List<Map<String, dynamic>> incomeCats = [];
+
+        for (var doc in docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final item = {
+            'id': doc.id,
+            'name': data['name'] ?? '',
+            'color': data['color'] ?? '2196f3', // blu di default
+          };
+          if (data['type'] == 'income') {
+            incomeCats.add(item);
+          } else {
+            expenseCats.add(item);
+          }
+        }
+
+        return Scaffold(
+          body: ListView(
+            padding: const EdgeInsets.all(16.0),
+            children: [
+              const Text("Gestione Categorie", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+
+              // SPESE
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Categorie Spese", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.redAccent)),
+                  TextButton.icon(
+                    onPressed: () => _addCategory(context, 'expense'),
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Aggiungi'),
+                  ),
+                ],
+              ),
+              Card(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: expenseCats.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final cat = expenseCats[i];
+                    final catColor = hexToColor(cat['color']);
+                    return ListTile(
+                      leading: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(color: catColor, shape: BoxShape.circle),
+                      ),
+                      title: Text(cat['name']),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blue),
+                            onPressed: () => _editCategory(context, cat['id'], cat['name'], cat['color']),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                            onPressed: () => _deleteCategory(context, cat['id'], cat['name']),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // ENTRATE
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Categorie Entrate", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green)),
+                  TextButton.icon(
+                    onPressed: () => _addCategory(context, 'income'),
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Aggiungi'),
+                  ),
+                ],
+              ),
+              Card(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: incomeCats.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final cat = incomeCats[i];
+                    final catColor = hexToColor(cat['color']);
+                    return ListTile(
+                      leading: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(color: catColor, shape: BoxShape.circle),
+                      ),
+                      title: Text(cat['name']),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blue),
+                            onPressed: () => _editCategory(context, cat['id'], cat['name'], cat['color']),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                            onPressed: () => _deleteCategory(context, cat['id'], cat['name']),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\services\notification_service.dart ===
+
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:flutter/foundation.dart';
+
+class NotificationService {
+  static final FlutterLocalNotificationsPlugin _notificationsPlugin =
+      FlutterLocalNotificationsPlugin();
+
+  static Future<void> init() async {
+    // 1. Inizializza i dati dei fusi orari
+    tz_data.initializeTimeZones();
+
+    // Impostiamo manualmente Roma per evitare dipendenze esterne
+    tz.setLocalLocation(tz.getLocation('Europe/Rome'));
+
+    // 2. Configurazione Android
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+
+    await _notificationsPlugin.initialize(
+      settings: initializationSettings,
+      onDidReceiveNotificationResponse: (details) {
+        debugPrint("Notifica cliccata!");
+      },
+    );
+
+    // 3. Permessi Android 13/14
+    final androidPlugin = _notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+
+    if (androidPlugin != null) {
+      final bool? granted = await androidPlugin
+          .requestNotificationsPermission();
+      debugPrint('POST_NOTIFICATIONS granted: $granted');
+
+      final bool? exact = await androidPlugin.requestExactAlarmsPermission();
+      debugPrint('Exact alarms permission: $exact');
+    }
+
+    // 4. Programma e mostra test
+    await scheduleDailyNotifications();
+    // await _showInstantTest();
+    await _showImmediateTest(); // Aggiunto test immediato
+  }
+
+  static Future<void> _showImmediateTest() async {
+    debugPrint("🔥 Chiamando _showImmediateTest()");
+    await _notificationsPlugin.show(
+      id: 999,
+      title: "Test Immediato! ⚡",
+      body: "Notifica mostrata subito dopo l'avvio.",
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'spese_channel',
+          'Spese Reminders',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+      ),
+    );
+    debugPrint("✅ _showImmediateTest() completata");
+  }
+
+  // static Future<void> _showInstantTest() async {
+  //   await _notificationsPlugin.show(
+  //     id: 888,
+  //     title: "Sistema Pronto! 🚀",
+  //     body: "Inizializzato con successo.",
+  //     notificationDetails: const NotificationDetails(
+  //       android: AndroidNotificationDetails(
+  //         'spese_channel_v3',
+  //         'Promemoria Spese',
+  //         importance: Importance.max,
+  //         priority: Priority.high,
+  //       ),
+  //     ),
+  //   );
+  // }
+
+  static Future<void> scheduleDailyNotifications() async {
+    await _notificationsPlugin.cancelAll();
+
+    // Notifiche giornaliere programmate
+    // await _schedule(id: 199, title: "Promemoria!", body: "Segna le spese", hour: 16, minute: 22);
+    await _schedule(id: 1, title: "Buongiorno! ☕", body: "Spese colazione?", hour: 9, minute: 0);
+    await _schedule(id: 2, title: "Pausa pranzo? 🥪", body: "Segna le spese!", hour: 15, minute: 0);
+    await _schedule(id: 3, title: "Fine giornata! 🌙", body: "Ultime spese?", hour: 21, minute: 30);
+  }
+
+  static Future<void> _schedule({
+    required int id,
+    required String title,
+    required String body,
+    required int hour,
+    required int minute,
+  }) async {
+    // SOLUZIONE: Usa Timer di Dart invece di zonedSchedule per evitare problemi Android
+    final now = DateTime.now();
+    var scheduledDate = DateTime(now.year, now.month, now.day, hour, minute);
+
+    // Se l'orario è già passato oggi, programma per domani
+    if (scheduledDate.isBefore(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 1));
+    }
+
+    // Calcola quanti secondi mancano all'orario programmato
+    final delaySeconds = scheduledDate.difference(now).inSeconds;
+
+    debugPrint("⏰ Programmando notifica ID $id per ${scheduledDate.toString()} (tra $delaySeconds secondi)");
+
+    // Usa Future.delayed per mostrare la notifica all'orario esatto
+    Future.delayed(Duration(seconds: delaySeconds), () async {
+      debugPrint("⏰ Notifica ID $id SCATTATA alle ${DateTime.now().toString()}");
+      try {
+        await _notificationsPlugin.show(
+          id: id,
+          title: title,
+          body: body,
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'spese_channel_v3',
+              'Promemoria Spese',
+              importance: Importance.max,
+              priority: Priority.high,
+              icon: '@mipmap/ic_launcher',
+              category: AndroidNotificationCategory.reminder,
+              visibility: NotificationVisibility.public,
+            ),
+          ),
+        );
+        debugPrint("✅ Notifica ID $id MOSTRATA con successo");
+      } catch (e) {
+        debugPrint("❌ Errore mostrando notifica ID $id: $e");
+      }
+    });
+  }
+}
+
+
+========================================
+
+=== FILE: lib\widgets\category_chart.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
+import '../models/transaction.dart';
+
+class CategoryChart extends StatefulWidget {
+  final List<Transaction> recentTransactions;
+
+  const CategoryChart(this.recentTransactions, {super.key});
+
+  @override
+  State<CategoryChart> createState() => _CategoryChartState();
+}
+
+class _CategoryChartState extends State<CategoryChart> {
+  Map<String, Color> _categoryColors = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategoryColors();
+  }
+
+  // Carica i colori personalizzati salvati su Firestore dall'utente
+  Future<void> _loadCategoryColors() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('categories')
+          .get();
+
+      Map<String, Color> colorsMap = {};
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final name = data['name'] as String?;
+        final hexColor = data['color'] as String?;
+        if (name != null) {
+          colorsMap[name] = _hexToColor(hexColor ?? '2196f3');
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _categoryColors = colorsMap;
+        });
+      }
+    } catch (_) {}
+  }
+
+  // Utility per convertire la stringa Hex in oggetto Color
+  Color _hexToColor(String hexString) {
+    try {
+      final buffer = StringBuffer();
+      if (hexString.length == 6 || hexString.length == 7) buffer.write('ff');
+      buffer.write(hexString.replaceFirst('#', ''));
+      return Color(int.parse(buffer.toString(), radix: 16));
+    } catch (_) {
+      return Colors.blue;
+    }
+  }
+
+  // Restituisce il colore personalizzato o un fallback coerente
+  Color _getCategoryColor(String category) {
+    if (_categoryColors.containsKey(category)) {
+      return _categoryColors[category]!;
+    }
+    // Fallback di default per categorie standard se non mappate
+    switch (category) {
+      case 'Cibo':
+        return Colors.redAccent;
+      case 'Trasporti':
+        return Colors.blueAccent;
+      case 'Svago':
+        return Colors.purpleAccent;
+      case 'Casa':
+        return Colors.orangeAccent;
+      default:
+        return Colors.teal; // Invece di grigio, usiamo un bel teal per evitare confusione
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.recentTransactions.isEmpty) {
+      return const Center(child: Text("Nessuna spesa nel periodo!"));
+    }
+
+    // 1. Calcoliamo il totale generale
+    double totalSum = 0.0;
+    // 2. Calcoliamo quanto abbiamo speso per ogni categoria
+    Map<String, double> categoryTotals = {};
+
+    for (var tx in widget.recentTransactions) {
+      totalSum += tx.amount;
+      if (categoryTotals.containsKey(tx.category)) {
+        categoryTotals[tx.category] = categoryTotals[tx.category]! + tx.amount;
+      } else {
+        categoryTotals[tx.category] = tx.amount;
+      }
+    }
+
+    // 3. Creiamo le "fette" della torta
+    List<PieChartSectionData> sections = [];
+    categoryTotals.forEach((category, amount) {
+      final percentage = totalSum > 0 ? (amount / totalSum) * 100 : 0.0;
+      sections.add(
+        PieChartSectionData(
+          color: _getCategoryColor(category),
+          value: amount,
+          title: '${percentage.toStringAsFixed(0)}%',
+          radius: 50,
+          titleStyle: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+      );
+    });
+
+    return Card(
+      elevation: 6,
+      margin: const EdgeInsets.all(20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 20.0),
+        child: Center( // <-- Centriamo tutto il contenuto nel blocco
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center, // <-- Centriamo gli elementi orizzontalmente
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // LA TORTA
+              Expanded(
+                flex: 5,
+                child: SizedBox(
+                  height: 160, // Diamo un'altezza fissa controllata alla torta
+                  child: PieChart(
+                    PieChartData(
+                      sections: sections,
+                      centerSpaceRadius: 35,
+                      sectionsSpace: 2,
+                    ),
+                  ),
+                ),
+              ),
+              
+              const SizedBox(width: 16),
+
+              // LA LEGENDA
+              Expanded(
+                flex: 4,
+                child: ListView(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: categoryTotals.keys.map((cat) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _getCategoryColor(cat),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              cat,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\widgets\chart.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../models/transaction.dart';
+import './chart_bar.dart';
+
+class Chart extends StatelessWidget {
+  final List<Transaction> recentTransactions;
+  final int periodIndex; // 0=Settimana, 1=Mese, 2=Anno
+  final DateTime referenceDate; // Data di inizio del periodo visualizzato
+
+  const Chart(
+    this.recentTransactions, 
+    this.periodIndex, 
+    this.referenceDate, 
+    {super.key}
+  );
+
+  List<Map<String, Object>> get groupedTransactionValues {
+    // --- CASO 0: SETTIMANA (Lunedì - Domenica) ---
+    if (periodIndex == 0) {
+      // referenceDate è già il Lunedì della settimana selezionata
+      return List.generate(7, (index) {
+        final weekDay = referenceDate.add(Duration(days: index));
+        var totalSum = 0.0;
+
+        for (var tx in recentTransactions) {
+          if (tx.date.day == weekDay.day &&
+              tx.date.month == weekDay.month &&
+              tx.date.year == weekDay.year) {
+            totalSum += tx.amount;
+          }
+        }
+
+        String dayName = DateFormat.E('it_IT').format(weekDay);
+        String label = dayName.substring(0, 1).toUpperCase() + dayName.substring(1);
+
+        return {'day': label, 'amount': totalSum};
+      });
+    }
+    // --- CASO 1: MESE (4 Settimane fisse del mese selezionato) ---
+else if (periodIndex == 1) {
+      final firstDayOfMonth = DateTime(referenceDate.year, referenceDate.month, 1);
+      final lastDayOfMonth = DateTime(referenceDate.year, referenceDate.month + 1, 0);
+
+      // Troviamo il Lunedì della settimana in cui cade il 1° del mese
+      DateTime currentMonday = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
+
+      List<Map<String, Object>> weeks = [];
+      int weekNumber = 1;
+
+      while (currentMonday.isBefore(lastDayOfMonth) || currentMonday.isAtSameMomentAs(lastDayOfMonth)) {
+        final sunday = currentMonday.add(const Duration(days: 6, hours: 23, minutes: 59, seconds: 59));
+        
+        // Calcola l'inizio e la fine limitati ai confini effettivi del mese
+        final startPeriod = currentMonday.isBefore(firstDayOfMonth) ? firstDayOfMonth : currentMonday;
+        final endPeriod = sunday.isAfter(lastDayOfMonth) ? lastDayOfMonth : sunday;
+
+        var totalSum = 0.0;
+        for (var tx in recentTransactions) {
+          if ((tx.date.isAfter(startPeriod) || tx.date.isAtSameMomentAs(startPeriod)) &&
+              (tx.date.isBefore(endPeriod) || tx.date.isAtSameMomentAs(endPeriod))) {
+            totalSum += tx.amount;
+          }
+        }
+
+        // Etichetta leggibile con l'intervallo reale (es. "1-6", "7-13", "14-20", ...)
+        final label = "${startPeriod.day}-${endPeriod.day}";
+
+        weeks.add({
+          'day': label,
+          'amount': totalSum,
+        });
+
+        // Passa al Lunedì successivo
+        currentMonday = currentMonday.add(const Duration(days: 7));
+        weekNumber++;
+      }
+
+      return weeks;
+    }
+    // --- CASO 2: ANNO (Gennaio - Dicembre dell'anno selezionato) ---
+    else {
+      return List.generate(12, (index) {
+        final monthNumber = index + 1;
+        var totalSum = 0.0;
+
+        for (var tx in recentTransactions) {
+          if (tx.date.month == monthNumber && tx.date.year == referenceDate.year) {
+            totalSum += tx.amount;
+          }
+        }
+
+        final dateForName = DateTime(referenceDate.year, monthNumber, 1);
+        String monthName = DateFormat.MMM('it_IT').format(dateForName);
+        String label = monthName.substring(0, 1).toUpperCase() + monthName.substring(1);
+
+        return {'day': label, 'amount': totalSum};
+      });
+    }
+  }
+
+  double get totalSpending {
+    return groupedTransactionValues.fold(0.0, (sum, item) {
+      return sum + (item['amount'] as double);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 6,
+      margin: const EdgeInsets.all(20),
+      color: Theme.of(context).cardColor,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                periodIndex == 0
+                    ? "Spese Settimanali"
+                    : periodIndex == 1
+                    ? "Spese Mensili"
+                    : "Spese Annuali (${referenceDate.year})",
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: groupedTransactionValues.map((data) {
+                  return Flexible(
+                    fit: FlexFit.tight,
+                    child: ChartBar(
+                      (data['day'] as String),
+                      (data['amount'] as double),
+                      totalSpending == 0.0
+                          ? 0.0
+                          : (data['amount'] as double) / totalSpending,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\widgets\chart_bar.dart ===
+
+import 'package:flutter/material.dart';
+
+class ChartBar extends StatelessWidget {
+  final String label; // Es: "L", "M", "M" (Giorno)
+  final double spendingAmount; // Es: 50.00
+  final double spendingPctOfTotal; // Es: 0.5 (cioè il 50% dell'altezza)
+
+  const ChartBar(
+    this.label,
+    this.spendingAmount,
+    this.spendingPctOfTotal, {
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // LayoutBuilder serve per sapere quanto spazio abbiamo in altezza
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        return Column(
+          children: [
+            // 1. L'importo scritto in alto (ridotto per stare nello spazio)
+            SizedBox(
+              height: constraints.maxHeight * 0.15,
+              child: FittedBox(
+                child: Text('€${spendingAmount.toStringAsFixed(2)}'),
+              ),
+            ),
+            SizedBox(height: constraints.maxHeight * 0.05),
+
+            // 2. La barra vera e propria (il tubo)
+            SizedBox(
+              height: constraints.maxHeight * 0.6,
+              width: 10,
+              child: Stack(
+                children: [
+                  // Sfondo grigio (tubo vuoto)
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey, width: 1.0),
+                      color: const Color.fromRGBO(220, 220, 220, 1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  // Parte colorata (tubo pieno) che cambia altezza
+                  FractionallySizedBox(
+                    heightFactor:
+                        spendingPctOfTotal, // Qui decidiamo quanto è alta!
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: constraints.maxHeight * 0.05),
+
+            // 3. La lettera del giorno in basso
+            SizedBox(
+              height: constraints.maxHeight * 0.15,
+              child: FittedBox(child: Text(label)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+
+========================================
+
+=== FILE: lib\widgets\chart_carousel.dart ===
+
+import 'package:flutter/material.dart';
+import '../models/transaction.dart';
+import './category_chart.dart';
+import './month_calendar_widget.dart';
+import './year_grid_widget.dart';
+import './week_grid_widget.dart';
+
+class ChartCarousel extends StatefulWidget {
+  final List<Transaction> recentTransactions;
+  final int selectedPeriodIndex;
+  final DateTime referenceDate;
+
+  const ChartCarousel({
+    super.key,
+    required this.recentTransactions,
+    required this.selectedPeriodIndex,
+    required this.referenceDate,
+  });
+
+  @override
+  State<ChartCarousel> createState() => _ChartCarouselState();
+}
+
+class _ChartCarouselState extends State<ChartCarousel> {
+  final PageController _pageController = PageController();
+  int _currentPageIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant ChartCarousel oldWidget) {
+    if (oldWidget.selectedPeriodIndex != widget.selectedPeriodIndex) {
+      _pageController.jumpToPage(0);
+      setState(() {
+        _currentPageIndex = 0;
+      });
+    }
+    super.didUpdateWidget(oldWidget);
+  }
+
+  Widget _buildPeriodChart() {
+    if (widget.selectedPeriodIndex == 0) {
+      return WeekGridWidget(
+        transactions: widget.recentTransactions,
+        referenceDate: widget.referenceDate,
+      );
+    } else if (widget.selectedPeriodIndex == 1) {
+      return MonthCalendarWidget(
+        transactions: widget.recentTransactions,
+        referenceDate: widget.referenceDate,
+      );
+    } else {
+      return YearGridWidget(
+        transactions: widget.recentTransactions,
+        referenceDate: widget.referenceDate,
+      );
+    }
+  }
+
+  double _getCarouselHeight() {
+    if (widget.selectedPeriodIndex == 0) {
+      // Per la settimana: 160 per la tabella, 235 quando fai swipe sulla torta
+      return _currentPageIndex == 0 ? 160.0 : 235.0;
+    } else if (widget.selectedPeriodIndex == 1) {
+      return 365.0; // Mese
+    } else {
+      return 340.0; // Anno
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          height: _getCarouselHeight(),
+          child: PageView(
+            controller: _pageController,
+            physics: const BouncingScrollPhysics(),
+            onPageChanged: (index) {
+              setState(() {
+                _currentPageIndex = index;
+              });
+            },
+            children: [
+              _buildPeriodChart(),
+              CategoryChart(widget.recentTransactions),
+            ],
+          ),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildDot(0),
+            _buildDot(1),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDot(int index) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+      height: 8,
+      width: _currentPageIndex == index ? 18 : 8,
+      decoration: BoxDecoration(
+        color: _currentPageIndex == index
+            ? Theme.of(context).primaryColor
+            : Colors.grey.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(5),
+      ),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\widgets\month_calendar_widget.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../models/transaction.dart';
+
+class MonthCalendarWidget extends StatelessWidget {
+  final List<Transaction> transactions;
+  final DateTime referenceDate;
+
+  const MonthCalendarWidget({
+    super.key,
+    required this.transactions,
+    required this.referenceDate,
+  });
+
+  void _showDayDetails(BuildContext context, DateTime day) {
+    final dayTxs = transactions.where((tx) =>
+        !tx.isIncome &&
+        tx.date.year == day.year &&
+        tx.date.month == day.month &&
+        tx.date.day == day.day
+    ).toList();
+
+    final formattedDate = DateFormat('EEEE d MMMM yyyy', 'it_IT').format(day);
+    final totalSpent = dayTxs.fold(0.0, (sum, tx) => sum + tx.amount);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                formattedDate.substring(0, 1).toUpperCase() + formattedDate.substring(1),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                "Totale speso: €${totalSpent.toStringAsFixed(2)}",
+                style: TextStyle(fontSize: 14, color: Colors.teal.shade800, fontWeight: FontWeight.w600),
+              ),
+              const Divider(height: 20),
+              if (dayTxs.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Center(
+                    child: Text("Nessuna spesa registrata in questo giorno.", style: TextStyle(color: Colors.grey)),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.4,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: dayTxs.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (ctx, i) {
+                      final tx = dayTxs[i];
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: Colors.teal.withOpacity(0.15),
+                          child: Icon(
+                            tx.paymentMethod == 'Carta' ? Icons.credit_card : Icons.money,
+                            size: 16,
+                            color: Colors.teal.shade800,
+                          ),
+                        ),
+                        title: Text(tx.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text("${tx.category} • ${tx.paymentMethod}"),
+                        trailing: Text(
+                          "- €${tx.amount.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final int year = referenceDate.year;
+    final int month = referenceDate.month;
+
+    final Map<int, double> dailyExpenses = {};
+    for (var tx in transactions) {
+      if (!tx.isIncome && tx.date.year == year && tx.date.month == month) {
+        final day = tx.date.day;
+        dailyExpenses[day] = (dailyExpenses[day] ?? 0.0) + tx.amount;
+      }
+    }
+
+    final firstDayOfMonth = DateTime(year, month, 1);
+    final daysInMonth = DateTime(year, month + 1, 0).day;
+    final int leadingEmptyDays = firstDayOfMonth.weekday - 1;
+
+    final totalGridCells = leadingEmptyDays + daysInMonth;
+    final int totalRows = (totalGridCells / 7).ceil();
+
+    const weekDays = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: weekDays.map((d) {
+                final isWeekend = (d == 'S' || d == 'D');
+                return SizedBox(
+                  width: 36,
+                  child: Center(
+                    child: Text(
+                      d,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        color: isWeekend ? Colors.redAccent.shade200 : Colors.grey.shade600,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const Divider(height: 10),
+            Expanded(
+              child: GridView.builder(
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: totalRows * 7,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  mainAxisSpacing: 3,
+                  crossAxisSpacing: 3,
+                  childAspectRatio: 1.0,
+                ),
+                itemBuilder: (context, index) {
+                  final dayNumber = index - leadingEmptyDays + 1;
+
+                  if (index < leadingEmptyDays || dayNumber > daysInMonth) {
+                    return const SizedBox.shrink();
+                  }
+
+                  final spent = dailyExpenses[dayNumber] ?? 0.0;
+                  final hasSpent = spent > 0.0;
+                  final dayDate = DateTime(year, month, dayNumber);
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () => _showDayDetails(context, dayDate),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: hasSpent
+                            ? Colors.teal.withOpacity(0.08)
+                            : Colors.grey.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: hasSpent
+                              ? Colors.teal.withOpacity(0.3)
+                              : Colors.transparent,
+                          width: 1,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 1, horizontal: 1),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '$dayNumber',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: hasSpent ? FontWeight.bold : FontWeight.normal,
+                              color: hasSpent ? Colors.teal.shade900 : Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              hasSpent ? '€${spent.toStringAsFixed(0)}' : '-',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: hasSpent ? FontWeight.bold : FontWeight.normal,
+                                color: hasSpent ? Colors.redAccent.shade700 : Colors.grey.shade400,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\widgets\new_transaction.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class NewTransaction extends StatefulWidget {
+  final Function(String, double, DateTime, String, bool, String) addTx;
+
+  final String? existingTitle;
+  final double? existingAmount;
+  final DateTime? existingDate;
+  final String? existingCategory;
+  final bool existingIsIncome;
+  final String? existingPaymentMethod;
+
+  const NewTransaction(
+    this.addTx, {
+    this.existingTitle,
+    this.existingAmount,
+    this.existingDate,
+    this.existingCategory,
+    super.key,
+    this.existingIsIncome = false,
+    this.existingPaymentMethod,
+  });
+
+  @override
+  State<NewTransaction> createState() => _NewTransactionState();
+}
+
+class _NewTransactionState extends State<NewTransaction> {
+  late TextEditingController _titleController;
+  late TextEditingController _amountController;
+  DateTime? _selectedDate;
+  String _selectedCategory = 'Altro';
+  bool _isIncome = false; 
+  String _paymentMethod = 'Contanti'; 
+
+  List<String> _expenseCategories = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
+  List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
+  List<String> _availableAccounts = ['Contanti', 'Carta'];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+
+    if (widget.existingTitle != null) {
+      _titleController = TextEditingController(text: widget.existingTitle);
+      _amountController = TextEditingController(text: widget.existingAmount.toString());
+      _selectedDate = widget.existingDate;
+      _selectedCategory = widget.existingCategory ?? 'Altro';
+      _isIncome = widget.existingIsIncome;
+      _paymentMethod = widget.existingPaymentMethod ?? 'Contanti';
+    } else {
+      _titleController = TextEditingController();
+      _amountController = TextEditingController();
+      _selectedDate = DateTime.now();
+      _isIncome = false;
+      _paymentMethod = 'Contanti';
+    }
+  }
+
+  Future<void> _loadData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Carica conti
+    final accSnap = await FirebaseFirestore.instance
+        .collection('users').doc(user.uid).collection('accounts').get();
+    if (accSnap.docs.isNotEmpty) {
+      setState(() {
+        _availableAccounts = accSnap.docs.map((d) => d.data()['name'].toString()).toList();
+        if (!_availableAccounts.contains(_paymentMethod)) {
+          _paymentMethod = _availableAccounts.first;
+        }
+      });
+    }
+
+    // Carica categorie unendo i default a quelle personalizzate su Firestore
+    final catSnap = await FirebaseFirestore.instance
+        .collection('users').doc(user.uid).collection('categories').get();
+    
+    List<String> defaultExp = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
+    List<String> defaultInc = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
+
+    if (catSnap.docs.isNotEmpty) {
+      for (var doc in catSnap.docs) {
+        final d = doc.data();
+        final name = d['name'].toString();
+        if (d['type'] == 'income') {
+          if (!defaultInc.contains(name)) defaultInc.add(name);
+        } else {
+          if (!defaultExp.contains(name)) defaultExp.add(name);
+        }
+      }
+    }
+
+    setState(() {
+      _expenseCategories = defaultExp;
+      _incomeCategories = defaultInc;
+      
+      final currentList = _isIncome ? _incomeCategories : _expenseCategories;
+      if (!currentList.contains(_selectedCategory)) {
+        _selectedCategory = currentList.first;
+      }
+    });
+  }
+
+  Future<void> _addNewCategoryQuickly(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final controller = TextEditingController();
+    final typeStr = _isIncome ? 'income' : 'expense';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_isIncome ? 'Nuova Categoria Entrata' : 'Nuova Categoria Spesa'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Nome Categoria'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annulla')),
+          ElevatedButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('categories')
+                    .add({'name': name, 'type': typeStr, 'createdAt': Timestamp.now()});
+                
+                await _loadData();
+                setState(() {
+                  _selectedCategory = name;
+                });
+              }
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Crea'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  void _submitData() {
+    if (_amountController.text.isEmpty) return;
+    final enteredTitle = _titleController.text;
+    final enteredAmount = double.parse(_amountController.text.replaceAll(',', '.'));
+
+    if (enteredTitle.isEmpty || enteredAmount <= 0 || _selectedDate == null) return;
+
+    widget.addTx(
+      enteredTitle,
+      enteredAmount,
+      _selectedDate!,
+      _selectedCategory,
+      _isIncome,
+      _paymentMethod,
+    );
+
+    Navigator.of(context).pop();
+  }
+
+  void _presentDatePicker() {
+    showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? DateTime.now(), 
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+      locale: const Locale("it", "IT"),
+    ).then((pickedDate) {
+      if (pickedDate != null) {
+        setState(() => _selectedDate = pickedDate);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentCategories = _isIncome ? _incomeCategories : _expenseCategories;
+    if (!currentCategories.contains(_selectedCategory) && currentCategories.isNotEmpty) {
+      _selectedCategory = currentCategories.first;
+    }
+
+    return Card(
+      elevation: 5,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            // 1. TIPO OPERAZIONE
+            const Text("Tipo di operazione:", style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildTypeButton("SPESA", false, Colors.red),
+                const SizedBox(width: 20),
+                _buildTypeButton("ENTRATA", true, Colors.green),
+              ],
+            ),
+            const Divider(height: 30),
+
+            // 2. CAMPI
+            TextField(
+              decoration: const InputDecoration(labelText: 'Titolo'),
+              controller: _titleController,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Importo (€)'),
+              controller: _amountController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            ),
+            const SizedBox(height: 15),
+
+            // 3. DATA E CATEGORIA CON PULSANTE "+"
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton(
+                  onPressed: _presentDatePicker,
+                  child: Text(_selectedDate == null 
+                    ? 'Scegli Data' 
+                    : DateFormat('dd/MM/yyyy').format(_selectedDate!)),
+                ),
+                Row(
+                  children: [
+                    DropdownButton<String>(
+                      value: _selectedCategory,
+                      onChanged: (val) => setState(() => _selectedCategory = val!),
+                      items: currentCategories
+                          .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
+                          .toList(),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, color: Colors.teal),
+                      onPressed: () => _addNewCategoryQuickly(context),
+                      tooltip: 'Aggiungi nuova categoria',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+
+            // 4. CONTENITORE / METODO
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text("Contenitore / Metodo:", style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              value: _paymentMethod,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              items: _availableAccounts.map((acc) {
+                return DropdownMenuItem(value: acc, child: Text(acc));
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) setState(() => _paymentMethod = val);
+              },
+            ),
+
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _submitData,
+              child: const Text('Conferma'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTypeButton(String label, bool isIncomeType, Color color) {
+    bool isSelected = _isIncome == isIncomeType;
+    return ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? color : Colors.grey.shade300,
+        foregroundColor: isSelected ? Colors.white : Colors.black54,
+      ),
+      onPressed: () {
+        setState(() {
+          _isIncome = isIncomeType;
+          _selectedCategory = isIncomeType ? _incomeCategories[0] : _expenseCategories[0];
+        });
+      },
+      child: Text(label),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\widgets\week_grid_widget.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../models/transaction.dart';
+
+class WeekGridWidget extends StatelessWidget {
+  final List<Transaction> transactions;
+  final DateTime referenceDate;
+
+  const WeekGridWidget({
+    super.key,
+    required this.transactions,
+    required this.referenceDate,
+  });
+
+  void _showDayDetails(BuildContext context, DateTime day) {
+    final dayTxs = transactions.where((tx) =>
+        !tx.isIncome &&
+        tx.date.year == day.year &&
+        tx.date.month == day.month &&
+        tx.date.day == day.day
+    ).toList();
+
+    final formattedDate = DateFormat('EEEE d MMMM yyyy', 'it_IT').format(day);
+    final totalSpent = dayTxs.fold(0.0, (sum, tx) => sum + tx.amount);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                formattedDate.substring(0, 1).toUpperCase() + formattedDate.substring(1),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                "Totale speso: €${totalSpent.toStringAsFixed(2)}",
+                style: TextStyle(fontSize: 14, color: Colors.teal.shade800, fontWeight: FontWeight.w600),
+              ),
+              const Divider(height: 20),
+              if (dayTxs.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Center(
+                    child: Text("Nessuna spesa registrata in questo giorno.", style: TextStyle(color: Colors.grey)),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.4,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: dayTxs.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (ctx, i) {
+                      final tx = dayTxs[i];
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: Colors.teal.withOpacity(0.15),
+                          child: Icon(
+                            tx.paymentMethod == 'Carta' ? Icons.credit_card : Icons.money,
+                            size: 16,
+                            color: Colors.teal.shade800,
+                          ),
+                        ),
+                        title: Text(tx.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text("${tx.category} • ${tx.paymentMethod}"),
+                        trailing: Text(
+                          "- €${tx.amount.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Map<String, dynamic>> weekDaysData = List.generate(7, (index) {
+      final currentDay = referenceDate.add(Duration(days: index));
+      double dailyTotal = 0.0;
+
+      for (var tx in transactions) {
+        if (!tx.isIncome &&
+            tx.date.year == currentDay.year &&
+            tx.date.month == currentDay.month &&
+            tx.date.day == currentDay.day) {
+          dailyTotal += tx.amount;
+        }
+      }
+
+      final dayLetter = DateFormat.E('it_IT').format(currentDay).substring(0, 1).toUpperCase();
+      final isWeekend = (index == 5 || index == 6);
+
+      return {
+        'date': currentDay,
+        'letter': dayLetter,
+        'dayNum': currentDay.day,
+        'spent': dailyTotal,
+        'isWeekend': isWeekend,
+      };
+    });
+
+    final formatter = DateFormat('d MMM', 'it_IT');
+    final endOfWeek = referenceDate.add(const Duration(days: 6));
+    final rangeLabel = "${formatter.format(referenceDate)} - ${formatter.format(endOfWeek)}";
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        child: Column(
+          children: [
+            Text(
+              "Riepilogo $rangeLabel",
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            const Divider(height: 12),
+            Row(
+              children: weekDaysData.map((data) {
+                final double spent = data['spent'] as double;
+                final bool hasSpent = spent > 0.0;
+                final bool isWeekend = data['isWeekend'] as bool;
+                final DateTime dayDate = data['date'] as DateTime;
+
+                return Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _showDayDetails(context, dayDate),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 1),
+                      decoration: BoxDecoration(
+                        color: hasSpent
+                            ? Colors.teal.withOpacity(0.08)
+                            : Colors.grey.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: hasSpent
+                              ? Colors.teal.withOpacity(0.3)
+                              : Colors.transparent,
+                          width: 1,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            data['letter'],
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isWeekend ? Colors.redAccent.shade200 : Colors.grey.shade600,
+                            ),
+                          ),
+                          Text(
+                            '${data['dayNum']}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: hasSpent ? Colors.teal.shade900 : Colors.black87,
+                              fontWeight: hasSpent ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              hasSpent ? '€${spent.toStringAsFixed(0)}' : '-',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: hasSpent ? FontWeight.bold : FontWeight.normal,
+                                color: hasSpent ? Colors.redAccent.shade700 : Colors.grey.shade400,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+========================================
+
+=== FILE: lib\widgets\year_grid_widget.dart ===
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../models/transaction.dart';
+
+class YearGridWidget extends StatelessWidget {
+  final List<Transaction> transactions;
+  final DateTime referenceDate;
+
+  const YearGridWidget({
+    super.key,
+    required this.transactions,
+    required this.referenceDate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final int year = referenceDate.year;
+
+    // 1. Somma delle spese per ciascun mese (1 = Gennaio ... 12 = Dicembre)
+    final Map<int, double> monthlyExpenses = {};
+    for (var tx in transactions) {
+      if (!tx.isIncome && tx.date.year == year) {
+        final month = tx.date.month;
+        monthlyExpenses[month] = (monthlyExpenses[month] ?? 0.0) + tx.amount;
+      }
+    }
+
+    const months = [
+      'Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu',
+      'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'
+    ];
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          children: [
+            Text(
+              "Riepilogo Mesi $year",
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            const Divider(height: 12),
+
+            // Griglia 4 colonne x 3 righe per i 12 mesi
+            Expanded(
+              child: GridView.builder(
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: 12,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 1.15,
+                ),
+                itemBuilder: (context, index) {
+                  final monthNumber = index + 1;
+                  final spent = monthlyExpenses[monthNumber] ?? 0.0;
+                  final hasSpent = spent > 0.0;
+
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: hasSpent
+                          ? Colors.teal.withOpacity(0.08)
+                          : Colors.grey.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: hasSpent
+                            ? Colors.teal.withOpacity(0.3)
+                            : Colors.transparent,
+                        width: 1,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          months[index],
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: hasSpent ? Colors.teal.shade900 : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            hasSpent ? '€${spent.toStringAsFixed(0)}' : '-',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: hasSpent ? FontWeight.bold : FontWeight.normal,
+                              color: hasSpent ? Colors.redAccent.shade700 : Colors.grey.shade400,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+========================================
+

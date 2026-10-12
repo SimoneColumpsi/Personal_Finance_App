@@ -211,24 +211,8 @@ class _HomePageState extends State<HomePage> {
           existingDate: tx.date,
           existingCategory: tx.category,
           existingIsIncome: tx.isIncome,
-          existingPaymentMethod: tx.paymentMethod, // Lo passeremo a NewTransaction
+          existingPaymentMethod: tx.paymentMethod,
         ),
-      ),
-    );
-  }
-
-  Widget _buildFilterButton(String title, int index) {
-    final isSelected = _selectedChartPeriod == index;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: OutlinedButton(
-        onPressed: () => setState(() => _selectedChartPeriod = index),
-        style: OutlinedButton.styleFrom(
-          backgroundColor: isSelected ? Theme.of(context).colorScheme.secondary : null,
-          foregroundColor: isSelected ? Colors.black : Theme.of(context).colorScheme.onSurface,
-          side: BorderSide(color: isSelected ? Colors.transparent : Colors.grey),
-        ),
-        child: Text(title),
       ),
     );
   }
@@ -277,10 +261,16 @@ class _HomePageState extends State<HomePage> {
 
         final List<Widget> pages = [
           BalanceScreen(loadedTransactions), 
-          ListView.builder(
-            itemCount: loadedTransactions.length,
-            itemBuilder: (ctx, index) => _buildTransactionItem(context, loadedTransactions[index], isDarkMode),
+          
+          // Schermata Lista Spese con Ricerca Combinata e Filtro Categoria
+          _ExpenseListScreen(
+            loadedTransactions, 
+            _categoryIcons, 
+            _deleteTransaction, 
+            _startEditTransaction, 
+            isDarkMode,
           ), 
+
           AnalyticsScreen(loadedTransactions), 
           const SettingsScreen(), 
         ];
@@ -342,8 +332,171 @@ class _HomePageState extends State<HomePage> {
       },
     );
   }
+}
 
-  Widget _buildTransactionItem(BuildContext context, Transaction tx, bool isDarkMode) {
+// Widget isolato per gestire ricerca (titolo/categoria) e filtri multipli in modo fluido
+class _ExpenseListScreen extends StatefulWidget {
+  final List<Transaction> transactions;
+  final Map<String, IconData> categoryIcons;
+  final Function(String) onDelete;
+  final Function(BuildContext, Transaction) onEdit;
+  final bool isDarkMode;
+
+  const _ExpenseListScreen(
+    this.transactions,
+    this.categoryIcons,
+    this.onDelete,
+    this.onEdit,
+    this.isDarkMode,
+  );
+
+  @override
+  State<_ExpenseListScreen> createState() => _ExpenseListScreenState();
+}
+
+class _ExpenseListScreenState extends State<_ExpenseListScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool? _filterIsIncome;
+  String? _filterCategory;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Estrae le categorie disponibili in base al filtro tipo corrente
+    final availableCategories = widget.transactions
+        .where((tx) => _filterIsIncome == null || tx.isIncome == _filterIsIncome)
+        .map((tx) => tx.category)
+        .toSet()
+        .toList();
+
+    if (_filterCategory != null && !availableCategories.contains(_filterCategory)) {
+      _filterCategory = null;
+    }
+
+    final filteredTransactions = widget.transactions.where((tx) {
+      final query = _searchQuery.toLowerCase();
+      final matchesQuery = tx.title.toLowerCase().contains(query) ||
+          tx.category.toLowerCase().contains(query);
+      
+      final matchesType = _filterIsIncome == null || tx.isIncome == _filterIsIncome;
+      final matchesCategory = _filterCategory == null || tx.category == _filterCategory;
+
+      return matchesQuery && matchesType && matchesCategory;
+    }).toList();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Column(
+            children: [
+              TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  labelText: 'Cerca per titolo o categoria...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                ),
+                onChanged: (val) {
+                  setState(() => _searchQuery = val);
+                },
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  // Filtro Tipo
+                  Expanded(
+                    child: DropdownButtonFormField<bool?>(
+                      value: _filterIsIncome,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        labelText: 'Tipo',
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: null, child: Text('Tutti')),
+                        DropdownMenuItem(value: false, child: Text('Spese')),
+                        DropdownMenuItem(value: true, child: Text('Entrate')),
+                      ],
+                      onChanged: (val) {
+                        setState(() {
+                          _filterIsIncome = val;
+                          _filterCategory = null;
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Filtro Categoria Dinamico
+                  Expanded(
+                    child: DropdownButtonFormField<String?>(
+                      value: _filterCategory,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        labelText: 'Categoria',
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('Tutte')),
+                        ...availableCategories.map((cat) => DropdownMenuItem(
+                              value: cat,
+                              child: Text(cat, overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
+                      onChanged: (val) => setState(() => _filterCategory = val),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  if (_searchQuery.isNotEmpty || _filterIsIncome != null || _filterCategory != null)
+                    IconButton(
+                      icon: const Icon(Icons.clear_all),
+                      tooltip: 'Resetta filtri',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                          _filterIsIncome = null;
+                          _filterCategory = null;
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const Divider(),
+        Expanded(
+          child: filteredTransactions.isEmpty
+              ? const Center(child: Text("Nessuna transazione trovata."))
+              : ListView.builder(
+                  itemCount: filteredTransactions.length,
+                  itemBuilder: (ctx, index) {
+                    return _buildItem(context, filteredTransactions[index]);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildItem(BuildContext context, Transaction tx) {
     return Dismissible(
       key: ValueKey(tx.id),
       background: Container(
@@ -365,14 +518,14 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-      onDismissed: (_) => _deleteTransaction(tx.id),
+      onDismissed: (_) => widget.onDelete(tx.id),
       child: Card(
-        elevation: isDarkMode ? 2 : 4,
-        color: isDarkMode ? Colors.grey.shade900 : null,
+        elevation: widget.isDarkMode ? 2 : 4,
+        color: widget.isDarkMode ? Colors.grey.shade900 : null,
         margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(15),
-          side: isDarkMode ? const BorderSide(color: Colors.amber, width: 1) : BorderSide.none,
+          side: widget.isDarkMode ? const BorderSide(color: Colors.amber, width: 1) : BorderSide.none,
         ),
         child: ListTile(
           leading: CircleAvatar(
@@ -382,7 +535,7 @@ class _HomePageState extends State<HomePage> {
                 : Colors.redAccent.withOpacity(0.7),
             foregroundColor: Colors.white,
             child: Icon(
-              _categoryIcons[tx.category] ?? Icons.category, 
+              widget.categoryIcons[tx.category] ?? Icons.category, 
               size: 30
             ),
           ),
@@ -406,7 +559,7 @@ class _HomePageState extends State<HomePage> {
               ),
               IconButton(
                 icon: const Icon(Icons.edit, color: Colors.blue),
-                onPressed: () => _startEditTransaction(context, tx),
+                onPressed: () => widget.onEdit(context, tx),
               ),
             ],
           ),
