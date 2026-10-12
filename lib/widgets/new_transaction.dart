@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class NewTransaction extends StatefulWidget {
-  // CORRETTO: La funzione ora accetta anche il sesto parametro String per il metodo di pagamento
   final Function(String, double, DateTime, String, bool, String) addTx;
 
   final String? existingTitle;
@@ -33,26 +34,61 @@ class _NewTransactionState extends State<NewTransaction> {
   DateTime? _selectedDate;
   String _selectedCategory = 'Altro';
   bool _isIncome = false; 
-  String _paymentMethod = 'Contanti'; // <--- AGGIUNTA VARIABILE DI STATO MANCANTE
+  String _paymentMethod = 'Contanti'; 
 
   final List<String> _expenseCategories = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
   final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
+  
+  // Lista dinamica dei box caricati da Firestore
+  List<String> _availableAccounts = ['Contanti', 'Carta'];
 
   @override
   void initState() {
     super.initState();
+    _loadAccounts();
+
     if (widget.existingTitle != null) {
       _titleController = TextEditingController(text: widget.existingTitle);
       _amountController = TextEditingController(text: widget.existingAmount.toString());
       _selectedDate = widget.existingDate;
       _selectedCategory = widget.existingCategory ?? 'Altro';
       _isIncome = widget.existingIsIncome;
-      _paymentMethod = widget.existingPaymentMethod ?? 'Contanti'; // Ora è definita sopra!
+      _paymentMethod = widget.existingPaymentMethod ?? 'Contanti';
     } else {
       _titleController = TextEditingController();
       _amountController = TextEditingController();
+      _selectedDate = DateTime.now(); // Default data odierna per comodità
       _isIncome = false;
-      _paymentMethod = 'Contanti'; // Default per nuove transazioni
+      _paymentMethod = 'Contanti';
+    }
+  }
+
+  // Carica i box personalizzati da Firestore
+  Future<void> _loadAccounts() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('accounts')
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        setState(() {
+          _availableAccounts = snapshot.docs
+              .map((doc) => doc.data()['name'].toString())
+              .toList();
+              
+          // Se il metodo attuale non è presente nella lista, seleziona il primo
+          if (!_availableAccounts.contains(_paymentMethod)) {
+            _paymentMethod = _availableAccounts.first;
+          }
+        });
+      }
+    } catch (e) {
+      // Gestione silenziosa in caso di errore di rete
     }
   }
 
@@ -77,7 +113,6 @@ class _NewTransactionState extends State<NewTransaction> {
       return;
     }
 
-    // CORRETTO: Passiamo il sesto parametro alla funzione del main.dart
     widget.addTx(
       enteredTitle,
       enteredAmount,
@@ -109,10 +144,15 @@ class _NewTransactionState extends State<NewTransaction> {
 
   @override
   Widget build(BuildContext context) {
+    // Assicuriamoci che il valore selezionato esista nella lista dei menu a tendina
+    if (!_availableAccounts.contains(_paymentMethod) && _availableAccounts.isNotEmpty) {
+      _paymentMethod = _availableAccounts.first;
+    }
+
     return Card(
       elevation: 5,
       child: Container(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -134,11 +174,13 @@ class _NewTransactionState extends State<NewTransaction> {
               decoration: const InputDecoration(labelText: 'Titolo'),
               controller: _titleController,
             ),
+            const SizedBox(height: 10),
             TextField(
               decoration: const InputDecoration(labelText: 'Importo (€)'),
               controller: _amountController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
+            const SizedBox(height: 15),
 
             // 3. DATA E CATEGORIA
             Row(
@@ -161,19 +203,30 @@ class _NewTransactionState extends State<NewTransaction> {
             ),
             const Divider(height: 20),
 
-            // 4. NUOVO SELETTORE GRAFICO PER IL METODO DI PAGAMENTO
-            const Text("Metodo di pagamento:", style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'Contanti', label: Text('Contanti'), icon: Icon(Icons.money)),
-                ButtonSegment(value: 'Carta', label: Text('Carta'), icon: Icon(Icons.credit_card)),
-              ],
-              selected: {_paymentMethod},
-              onSelectionChanged: (Set<String> newSelection) {
-                setState(() {
-                  _paymentMethod = newSelection.first;
-                });
+            // 4. SELETTORE DINAMICO DEL CONTENITORE
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text("Contenitore / Metodo:", style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              value: _paymentMethod,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              items: _availableAccounts.map((acc) {
+                return DropdownMenuItem(
+                  value: acc,
+                  child: Text(acc),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() {
+                    _paymentMethod = val;
+                  });
+                }
               },
             ),
 
