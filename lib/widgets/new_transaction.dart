@@ -36,16 +36,14 @@ class _NewTransactionState extends State<NewTransaction> {
   bool _isIncome = false; 
   String _paymentMethod = 'Contanti'; 
 
-  final List<String> _expenseCategories = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
-  final List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
-  
-  // Lista dinamica dei box caricati da Firestore
+  List<String> _expenseCategories = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
+  List<String> _incomeCategories = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
   List<String> _availableAccounts = ['Contanti', 'Carta'];
 
   @override
   void initState() {
     super.initState();
-    _loadAccounts();
+    _loadData();
 
     if (widget.existingTitle != null) {
       _titleController = TextEditingController(text: widget.existingTitle);
@@ -57,39 +55,97 @@ class _NewTransactionState extends State<NewTransaction> {
     } else {
       _titleController = TextEditingController();
       _amountController = TextEditingController();
-      _selectedDate = DateTime.now(); // Default data odierna per comodità
+      _selectedDate = DateTime.now();
       _isIncome = false;
       _paymentMethod = 'Contanti';
     }
   }
 
-  // Carica i box personalizzati da Firestore
-  Future<void> _loadAccounts() async {
+  Future<void> _loadData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('accounts')
-          .get();
-
-      if (snapshot.docs.isNotEmpty) {
-        setState(() {
-          _availableAccounts = snapshot.docs
-              .map((doc) => doc.data()['name'].toString())
-              .toList();
-              
-          // Se il metodo attuale non è presente nella lista, seleziona il primo
-          if (!_availableAccounts.contains(_paymentMethod)) {
-            _paymentMethod = _availableAccounts.first;
-          }
-        });
-      }
-    } catch (e) {
-      // Gestione silenziosa in caso di errore di rete
+    // Carica conti
+    final accSnap = await FirebaseFirestore.instance
+        .collection('users').doc(user.uid).collection('accounts').get();
+    if (accSnap.docs.isNotEmpty) {
+      setState(() {
+        _availableAccounts = accSnap.docs.map((d) => d.data()['name'].toString()).toList();
+        if (!_availableAccounts.contains(_paymentMethod)) {
+          _paymentMethod = _availableAccounts.first;
+        }
+      });
     }
+
+    // Carica categorie unendo i default a quelle personalizzate su Firestore
+    final catSnap = await FirebaseFirestore.instance
+        .collection('users').doc(user.uid).collection('categories').get();
+    
+    List<String> defaultExp = ['Cibo', 'Trasporti', 'Svago', 'Casa', 'Altro'];
+    List<String> defaultInc = ['Stipendio', 'Regalo', 'Vendita', 'Bonus', 'Altro'];
+
+    if (catSnap.docs.isNotEmpty) {
+      for (var doc in catSnap.docs) {
+        final d = doc.data();
+        final name = d['name'].toString();
+        if (d['type'] == 'income') {
+          if (!defaultInc.contains(name)) defaultInc.add(name);
+        } else {
+          if (!defaultExp.contains(name)) defaultExp.add(name);
+        }
+      }
+    }
+
+    setState(() {
+      _expenseCategories = defaultExp;
+      _incomeCategories = defaultInc;
+      
+      final currentList = _isIncome ? _incomeCategories : _expenseCategories;
+      if (!currentList.contains(_selectedCategory)) {
+        _selectedCategory = currentList.first;
+      }
+    });
+  }
+
+  Future<void> _addNewCategoryQuickly(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final controller = TextEditingController();
+    final typeStr = _isIncome ? 'income' : 'expense';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_isIncome ? 'Nuova Categoria Entrata' : 'Nuova Categoria Spesa'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Nome Categoria'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annulla')),
+          ElevatedButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('categories')
+                    .add({'name': name, 'type': typeStr, 'createdAt': Timestamp.now()});
+                
+                await _loadData();
+                setState(() {
+                  _selectedCategory = name;
+                });
+              }
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Crea'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -100,18 +156,11 @@ class _NewTransactionState extends State<NewTransaction> {
   }
 
   void _submitData() {
-    if (_amountController.text.isEmpty) {
-      return;
-    }
-
+    if (_amountController.text.isEmpty) return;
     final enteredTitle = _titleController.text;
-    final enteredAmount = double.parse(
-      _amountController.text.replaceAll(',', '.'),
-    );
+    final enteredAmount = double.parse(_amountController.text.replaceAll(',', '.'));
 
-    if (enteredTitle.isEmpty || enteredAmount <= 0 || _selectedDate == null) {
-      return;
-    }
+    if (enteredTitle.isEmpty || enteredAmount <= 0 || _selectedDate == null) return;
 
     widget.addTx(
       enteredTitle,
@@ -133,20 +182,17 @@ class _NewTransactionState extends State<NewTransaction> {
       lastDate: DateTime.now(),
       locale: const Locale("it", "IT"),
     ).then((pickedDate) {
-      if (pickedDate == null) {
-        return;
+      if (pickedDate != null) {
+        setState(() => _selectedDate = pickedDate);
       }
-      setState(() {
-        _selectedDate = pickedDate;
-      });
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Assicuriamoci che il valore selezionato esista nella lista dei menu a tendina
-    if (!_availableAccounts.contains(_paymentMethod) && _availableAccounts.isNotEmpty) {
-      _paymentMethod = _availableAccounts.first;
+    final currentCategories = _isIncome ? _incomeCategories : _expenseCategories;
+    if (!currentCategories.contains(_selectedCategory) && currentCategories.isNotEmpty) {
+      _selectedCategory = currentCategories.first;
     }
 
     return Card(
@@ -156,7 +202,7 @@ class _NewTransactionState extends State<NewTransaction> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            // 1. SCELTA TIPO (ENTRATA O SPESA)
+            // 1. TIPO OPERAZIONE
             const Text("Tipo di operazione:", style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             Row(
@@ -169,7 +215,7 @@ class _NewTransactionState extends State<NewTransaction> {
             ),
             const Divider(height: 30),
 
-            // 2. CAMPI TESTUALI
+            // 2. CAMPI
             TextField(
               decoration: const InputDecoration(labelText: 'Titolo'),
               controller: _titleController,
@@ -182,7 +228,7 @@ class _NewTransactionState extends State<NewTransaction> {
             ),
             const SizedBox(height: 15),
 
-            // 3. DATA E CATEGORIA
+            // 3. DATA E CATEGORIA CON PULSANTE "+"
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -192,18 +238,27 @@ class _NewTransactionState extends State<NewTransaction> {
                     ? 'Scegli Data' 
                     : DateFormat('dd/MM/yyyy').format(_selectedDate!)),
                 ),
-                DropdownButton<String>(
-                  value: _selectedCategory,
-                  onChanged: (val) => setState(() => _selectedCategory = val!),
-                  items: (_isIncome ? _incomeCategories : _expenseCategories)
-                      .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
-                      .toList(),
+                Row(
+                  children: [
+                    DropdownButton<String>(
+                      value: _selectedCategory,
+                      onChanged: (val) => setState(() => _selectedCategory = val!),
+                      items: currentCategories
+                          .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
+                          .toList(),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, color: Colors.teal),
+                      onPressed: () => _addNewCategoryQuickly(context),
+                      tooltip: 'Aggiungi nuova categoria',
+                    ),
+                  ],
                 ),
               ],
             ),
             const Divider(height: 20),
 
-            // 4. SELETTORE DINAMICO DEL CONTENITORE
+            // 4. CONTENITORE / METODO
             const Align(
               alignment: Alignment.centerLeft,
               child: Text("Contenitore / Metodo:", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -216,17 +271,10 @@ class _NewTransactionState extends State<NewTransaction> {
                 contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
               items: _availableAccounts.map((acc) {
-                return DropdownMenuItem(
-                  value: acc,
-                  child: Text(acc),
-                );
+                return DropdownMenuItem(value: acc, child: Text(acc));
               }).toList(),
               onChanged: (val) {
-                if (val != null) {
-                  setState(() {
-                    _paymentMethod = val;
-                  });
-                }
+                if (val != null) setState(() => _paymentMethod = val);
               },
             ),
 
